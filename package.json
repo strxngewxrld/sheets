@@ -59,7 +59,8 @@
   "contributes": {
     "configurationDefaults": {
       "workbench.editorAssociations": {
-        "*.xlsx": "sheets.spreadsheet"
+        "*.xlsx": "sheets.spreadsheet",
+        "*.xlsm": "sheets.spreadsheet"
       }
     },
     "customEditors": [
@@ -69,6 +70,9 @@
         "selector": [
           {
             "filenamePattern": "*.xlsx"
+          },
+          {
+            "filenamePattern": "*.xlsm"
           }
         ],
         "priority": "default"
@@ -166,14 +170,14 @@
       "explorer/context": [
         {
           "command": "sheets.openWithSheets",
-          "when": "resourceExtname =~ /\\.(csv|tsv|xlsx)$/",
+          "when": "resourceExtname =~ /\\.(csv|tsv|xlsx|xlsm)$/",
           "group": "navigation"
         }
       ],
       "editor/title": [
         {
           "command": "sheets.openWithSheets",
-          "when": "resourceExtname =~ /\\.(csv|tsv|xlsx)$/ && activeCustomEditorId != sheets.spreadsheet && activeCustomEditorId != sheets.csv",
+          "when": "resourceExtname =~ /\\.(csv|tsv|xlsx|xlsm)$/ && activeCustomEditorId != sheets.spreadsheet && activeCustomEditorId != sheets.csv",
           "group": "navigation"
         },
         {

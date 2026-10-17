@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
     vscode.commands.registerCommand('sheets.openFile', async () => {
       const selected = await vscode.window.showOpenDialog({
         canSelectMany: false,
-        filters: { Spreadsheets: ['xlsx', 'csv', 'tsv'] },
+        filters: { Spreadsheets: ['xlsx', 'xlsm', 'csv', 'tsv'] },
       });
       const target = selected?.[0];
       if (!target) return;

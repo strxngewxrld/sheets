@@ -87,3 +87,27 @@ describe('xlsx roundtrip', () => {
     expect(s.charts[0]!.series[0]!.values).toBe('Sheet1!$B$2:$B$4');
   });
 });
+
+describe('macro-enabled workbooks', () => {
+  it('keeps the VBA project and content types when editing an .xlsm file', async () => {
+    const { strFromU8, strToU8, unzipSync, zipSync } = await import('fflate');
+    const { formatFromFileName, isXlsxFormat, openWorkbook, saveWorkbook, setValues, Workbook } = await import('../src/index.js');
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [['Macro', 1]]);
+    const parts = unzipSync(saveWorkbook(wb, 'xlsm'));
+    expect(strFromU8(parts['[Content_Types].xml']!)).toContain('application/vnd.ms-excel.sheet.macroEnabled.main+xml');
+    // Simulate an Excel macro project.
+    parts['xl/vbaProject.bin'] = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1, 2, 3]);
+    parts['[Content_Types].xml'] = strToU8(strFromU8(parts['[Content_Types].xml']!).replace('</Types>', '<Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>'));
+    const original = zipSync(parts);
+    expect(formatFromFileName('Budget.XLSM')).toBe('xlsm');
+    expect(isXlsxFormat('xlsm')).toBe(true);
+    const opened = openWorkbook(original, 'Budget.xlsm');
+    expect(saveWorkbook(opened, 'xlsm')).toEqual(original);
+    setValues(opened, 0, 0, 1, [[2]]);
+    const saved = unzipSync(saveWorkbook(opened, 'xlsm'));
+    expect(saved['xl/vbaProject.bin']).toEqual(parts['xl/vbaProject.bin']);
+    expect(strFromU8(saved['[Content_Types].xml']!)).toContain('vbaProject');
+    expect(openWorkbook(zipSync(saved), 'Budget.xlsm').getValue(0, 0, 1)).toBe(2);
+  });
+});

@@ -441,6 +441,8 @@ export interface XlsxWriteOptions {
   /** Zip compression level 0-9 (default 6). */
   compression?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   application?: string;
+  /** Write the macro-enabled workbook content type (.xlsm). Existing macros are kept by the preserving writer. */
+  macroEnabled?: boolean;
 }
 
 export function writeXlsx(wb: Workbook, options: XlsxWriteOptions = {}): Uint8Array {
@@ -572,7 +574,7 @@ function writeFreshXlsx(wb: Workbook, options: XlsxWriteOptions): Uint8Array {
       '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
       '<Default Extension="xml" ContentType="application/xml"/>' +
-      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      `<Override PartName="/xl/workbook.xml" ContentType="${options.macroEnabled ? 'application/vnd.ms-excel.sheet.macroEnabled.main+xml' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'}"/>` +
       '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
       '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
       '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +

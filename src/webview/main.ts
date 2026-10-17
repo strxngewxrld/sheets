@@ -1,6 +1,7 @@
 import {
   detectDelimiter,
   formatFromFileName,
+  isXlsxFormat,
   LOCALE_DE,
   LOCALE_EN,
   openWorkbook,
@@ -33,14 +34,15 @@ let saveCheck: ReturnType<typeof setTimeout> | undefined;
 /** Warns in the editor when the current changes would be refused on XLSX save. */
 function scheduleSaveCheck(wb: Workbook): void {
   clearTimeout(saveCheck);
-  if (formatFromFileName(fileName) !== 'xlsx' || !wb.xlsxSource) {
+  const format = formatFromFileName(fileName);
+  if (!isXlsxFormat(format) || !wb.xlsxSource) {
     view?.setNotice(null);
     return;
   }
   saveCheck = setTimeout(() => {
     if (view?.workbook !== wb) return;
     try {
-      saveWorkbook(wb, 'xlsx');
+      saveWorkbook(wb, format);
       view.setNotice(null);
     } catch (e) {
       const message = (e as Error).message;
@@ -77,7 +79,7 @@ function init(msg: InitMessage): void {
     // A file newly created through the VS Code explorer has no ZIP container yet.
     // Initialize its model in memory; only an explicit save writes the XLSX file.
     if (snapshot && snapshot.type !== 'sheets-backup-v1') throw new Error('Invalid Sheets backup');
-    const wb = snapshot ? Workbook.fromJSON(snapshot.workbook) : bytes.length === 0 && format === 'xlsx'
+    const wb = snapshot ? Workbook.fromJSON(snapshot.workbook) : bytes.length === 0 && isXlsxFormat(format)
       ? new Workbook()
       : openWorkbook(bytes, fileName, { csv: { delimiter: csvDelimiter, locale: csvDelimiter === ';' ? LOCALE_DE : LOCALE_EN } });
     if (!view) {

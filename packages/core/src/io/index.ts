@@ -4,13 +4,19 @@ import { readCsv, writeCsv, type CsvReadOptions, type CsvWriteOptions } from './
 import { readXlsx, type XlsxReadOptions } from './xlsx-read.js';
 import { writeXlsx, type XlsxWriteOptions } from './xlsx-write.js';
 
-export type FileFormat = 'xlsx' | 'csv' | 'tsv' | 'json';
+export type FileFormat = 'xlsx' | 'xlsm' | 'csv' | 'tsv' | 'json';
+
+/** Excel workbook formats (macros in .xlsm are kept but never run). */
+export function isXlsxFormat(format: FileFormat): format is 'xlsx' | 'xlsm' {
+  return format === 'xlsx' || format === 'xlsm';
+}
 
 export function formatFromFileName(name: string): FileFormat {
   const ext = name.toLowerCase().split('.').pop();
   if (ext === 'csv' || ext === 'txt') return 'csv';
   if (ext === 'tsv' || ext === 'tab') return 'tsv';
   if (ext === 'json') return 'json';
+  if (ext === 'xlsm') return 'xlsm';
   return 'xlsx';
 }
 
@@ -50,6 +56,8 @@ export function saveWorkbook(wb: Workbook, format: FileFormat, options: SaveOpti
       return strToU8(writeCsv(wb, wb.activeSheetIndex, { delimiter: '\t', ...options.csv }));
     case 'json':
       return strToU8(JSON.stringify(wb.toJSON(), null, 2));
+    case 'xlsm':
+      return writeXlsx(wb, { ...options.xlsx, macroEnabled: true });
     default:
       return writeXlsx(wb, options.xlsx);
   }
