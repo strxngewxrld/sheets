@@ -141,3 +141,52 @@ describe('dynamic arrays', () => {
     expect(() => sortRange(wb, 0, toRange('A1:A3'), [{ col: 0 }])).toThrow(/SORT formula/);
   });
 });
+
+describe('array shaping functions', () => {
+  function spill(formula: string, setup?: (wb: Workbook) => void) {
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
+    setup?.(wb);
+    setValues(wb, 0, 10, 0, [[formula]]);
+    const range = wb.activeSheet.getCell(10, 0)?.spillRange;
+    if (!range) return wb.getValue(0, 10, 0);
+    return Array.from({ length: range.end.row - range.start.row + 1 }, (_, r) =>
+      Array.from({ length: range.end.col - range.start.col + 1 }, (_, c) => wb.getValue(0, range.start.row + r, range.start.col + c)));
+  }
+  const NA = expect.objectContaining({ code: '#N/A' });
+
+  it('stacks arrays and pads with #N/A', () => {
+    expect(spill('=VSTACK({1,2}, {3})')).toEqual([[1, 2], [3, NA]]);
+    expect(spill('=HSTACK({1;2}, {3})')).toEqual([[1, 3], [2, NA]]);
+    expect(spill('=VSTACK(A1:C1, A3:C3)')).toEqual([[1, 2, 3], [7, 8, 9]]);
+  });
+
+  it('takes, drops and chooses rows and columns', () => {
+    expect(spill('=TAKE(A1:C3, 2)')).toEqual([[1, 2, 3], [4, 5, 6]]);
+    expect(spill('=TAKE(A1:C3, -1, -2)')).toEqual([[8, 9]]);
+    expect(spill('=TAKE(A1:C3, , 1)')).toEqual([[1], [4], [7]]);
+    expect(spill('=DROP(A1:C3, 1, -1)')).toEqual([[4, 5], [7, 8]]);
+    expect(spill('=DROP(A1:C3, 3)')).toMatchObject({ code: '#CALC!' });
+    expect(spill('=CHOOSEROWS(A1:C3, 3, -3)')).toEqual([[7, 8, 9], [1, 2, 3]]);
+    expect(spill('=CHOOSECOLS(A1:C3, {2,1})')).toEqual([[2, 1], [5, 4], [8, 7]]);
+    expect(spill('=CHOOSECOLS(A1:C3, 4)')).toMatchObject({ code: '#VALUE!' });
+  });
+
+  it('flattens, wraps and expands', () => {
+    expect(spill('=TOROW(A1:B2)')).toEqual([[1, 2, 4, 5]]);
+    expect(spill('=TOCOL(A1:B2, 0, TRUE)')).toEqual([[1], [4], [2], [5]]);
+    expect(spill('=TOCOL(D1:E2, 1)', (wb) => setValues(wb, 0, 0, 3, [['a', null], [null, '=1/0']]))).toEqual([['a'], [expect.objectContaining({ code: '#DIV/0!' })]]);
+    expect(spill('=TOCOL(D1:E2, 3)', (wb) => setValues(wb, 0, 0, 3, [['a', null], [null, '=1/0']]))).toEqual([['a']]);
+    expect(spill('=WRAPROWS(SEQUENCE(5), 2, 0)')).toEqual([[1, 2], [3, 4], [5, 0]]);
+    expect(spill('=WRAPCOLS({1,2,3}, 2)')).toEqual([[1, 3], [2, NA]]);
+    expect(spill('=EXPAND({1,2}, 2, 3, "-")')).toEqual([[1, 2, '-'], ['-', '-', '-']]);
+    expect(spill('=EXPAND(A1:C3, 2)')).toMatchObject({ code: '#VALUE!' });
+  });
+
+  it('sorts by other arrays with stable multi-key order', () => {
+    const setup = (wb: Workbook) => setValues(wb, 0, 0, 4, [['b', 2], ['a', 2], ['c', 1]]);
+    expect(spill('=SORTBY(E1:E3, F1:F3, 1, E1:E3, -1)', setup)).toEqual([['c'], ['b'], ['a']]);
+    expect(spill('=SORTBY({"x","y","z"}, {3,1,2})')).toEqual([['y', 'z', 'x']]);
+    expect(spill('=SORTBY(E1:E3, F1:F2)', setup)).toMatchObject({ code: '#VALUE!' });
+  });
+});
