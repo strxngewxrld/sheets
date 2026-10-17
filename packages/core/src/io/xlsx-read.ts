@@ -15,6 +15,7 @@ import { hasUnknownFunctions } from '../formula/scope.js';
 import { CONDITIONAL_OPERATORS, defaultIconThresholds, iconCount, ICON_SETS, type ConditionalFormatRule, type ConditionalOperator, type IconSetName, type Threshold } from '../conditional.js';
 import { TABLE_THEMES, type TableTheme } from '../table.js';
 import { readValidations } from './xlsx-validations.js';
+import { scanSheetData } from './sheet-data.js';
 import { applyTint, DEFAULT_THEME, INDEXED_COLORS } from './colors.js';
 import { arr, attr, collectText, decodeOoxmlEscapes, flag, numAttr, parseXml, relsPathFor, resolvePath, text, type XNode } from './xml.js';
 import { encodeXlsxArchive } from './xlsx-preserve.js';
@@ -48,6 +49,10 @@ class Package {
   }
   has(path: string): boolean {
     return path in this.files;
+  }
+  text(path: string): string | undefined {
+    const f = this.files[path];
+    return f ? strFromU8(f) : undefined;
   }
   xml(path: string): XNode | undefined {
     const f = this.files[path];
@@ -369,8 +374,12 @@ function canonicalThresholds(ts: Threshold[]): string {
 }
 
 function readSheet(pkg: Package, path: string, name: string, sharedStrings: string[], styles: StyleReader): SheetData {
-  const doc = pkg.xml(path);
+  // Rows and cells are read by a dedicated scanner; the generic parser handles the rest.
+  const source = pkg.text(path);
+  const scanned = source ? scanSheetData(source) : null;
+  const doc = scanned ? parseXml(source!.slice(0, scanned.start) + source!.slice(scanned.end)) : pkg.xml(path);
   const ws = doc?.worksheet ?? {};
+  if (scanned) ws.sheetData = { row: scanned.rows };
   const sheet: SheetData = { name, cells: {} };
 
   const fmt = ws.sheetFormatPr;
