@@ -193,20 +193,32 @@ export class Sheet {
 
   static fromJSON(data: SheetData): Sheet {
     const sheet = new Sheet(data.name);
-    for (const [addr, cd] of Object.entries(data.cells ?? {})) {
+    const cells = data.cells ?? {};
+    const anchors: [string, string][] = [];
+    for (const addr in cells) {
+      const cd = cells[addr]!;
       const a = parseAddress(addr);
       if (a) sheet.cells.set(cellKey(a.row, a.col), Sheet.dataToCell(cd));
+      if (cd.a) anchors.push([addr, cd.a]);
     }
-    for (const [addr, cd] of Object.entries(data.cells ?? {})) {
-      if (!cd.a) continue;
+    for (const [addr, extent] of anchors) {
       const anchor = parseAddress(addr);
-      const range = parseRange(cd.a)?.range;
+      const range = parseRange(extent)?.range;
       if (!anchor || !range || !sheet.getCell(anchor.row, anchor.col)?.formula) continue;
       const parent = cellKey(anchor.row, anchor.col);
       sheet.cells.get(parent)!.spillRange = range;
-      for (const [key, cell] of sheet.cells) {
-        const p = keyToAddress(key);
-        if (key !== parent && !cell.formula && p.row >= range.start.row && p.row <= range.end.row && p.col >= range.start.col && p.col <= range.end.col) cell.spillParent = parent;
+      const mark = (key: number, cell: Cell) => { if (key !== parent && !cell.formula) cell.spillParent = parent; };
+      const area = (range.end.row - range.start.row + 1) * (range.end.col - range.start.col + 1);
+      if (area <= sheet.cells.size) {
+        for (let r = range.start.row; r <= range.end.row; r++) for (let c = range.start.col; c <= range.end.col; c++) {
+          const key = cellKey(r, c), cell = sheet.cells.get(key);
+          if (cell) mark(key, cell);
+        }
+      } else {
+        for (const [key, cell] of sheet.cells) {
+          const p = keyToAddress(key);
+          if (p.row >= range.start.row && p.row <= range.end.row && p.col >= range.start.col && p.col <= range.end.col) mark(key, cell);
+        }
       }
     }
     for (const [k, v] of Object.entries(data.colWidths ?? {})) sheet.colWidths.set(Number(k), v);

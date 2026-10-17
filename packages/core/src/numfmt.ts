@@ -379,12 +379,25 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const localeNumberRes = new Map<string, RegExp>();
+
+/** Number pattern with the locale's group and decimal separators (cached). */
+function localeNumberRe(loc: FormatLocale): RegExp {
+  const key = `${loc.group}\u0000${loc.decimal}`;
+  let re = localeNumberRes.get(key);
+  if (!re) {
+    const g = escapeRe(loc.group);
+    const d = escapeRe(loc.decimal);
+    re = new RegExp(`^[+-]?(\\d{1,3}(${g}\\d{3})+|\\d*)(${d}\\d+)?([eE][+-]?\\d+)?$`);
+    localeNumberRes.set(key, re);
+  }
+  return re;
+}
+
 export function parseNumber(text: string, loc: FormatLocale = defaultLocale): number | null {
   const s = text.trim().replace(/\s/g, '');
   if (!s) return null;
-  const g = escapeRe(loc.group);
-  const d = escapeRe(loc.decimal);
-  const localeRe = new RegExp(`^[+-]?(\\d{1,3}(${g}\\d{3})+|\\d*)(${d}\\d+)?([eE][+-]?\\d+)?$`);
+  const localeRe = localeNumberRe(loc);
   if (localeRe.test(s) && /\d/.test(s)) {
     const n = Number(s.split(loc.group).join('').replace(loc.decimal, '.'));
     if (Number.isFinite(n)) return n;
