@@ -57,7 +57,7 @@ function init(msg: InitMessage): void {
       ? new Workbook()
       : openWorkbook(bytes, fileName, { csv: { delimiter: csvDelimiter, locale: csvDelimiter === ';' ? LOCALE_DE : LOCALE_EN } });
     if (!view) {
-      view = new SpreadsheetView(app, wb, { locale, language: msg.language, keyboardUndo: false, readOnly: msg.readOnly });
+      view = new SpreadsheetView(app, wb, { locale, language: msg.language, keyboardUndo: false, readOnly: msg.readOnly, onOpenLink: (url) => post({ type: 'openLink', url }) });
       agent = new SpreadsheetAgent(() => view!.workbook, { host: view.agentHost });
     } else {
       view.setWorkbook(wb);

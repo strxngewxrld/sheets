@@ -159,6 +159,10 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
         case 'response':
           document.handleResponse(msg.id, msg.result, msg.error);
           break;
+        case 'openLink':
+          // Only web and mail links; VS Code asks before opening untrusted domains.
+          if (/^(https?:|mailto:)/i.test(msg.url)) void vscode.env.openExternal(vscode.Uri.parse(msg.url, true));
+          break;
         case 'error':
           document.reset(msg.message);
           void vscode.window.showErrorMessage(`Sheets: ${msg.message}`);

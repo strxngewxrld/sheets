@@ -26,5 +26,6 @@ export type WebviewToHost =
   | { type: 'ready' }
   | { type: 'initialized' }
   | { type: 'edit'; label: string }
+  | { type: 'openLink'; url: string }
   | { type: 'response'; id: number; result?: unknown; error?: string }
   | { type: 'error'; message: string };

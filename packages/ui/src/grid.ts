@@ -1,4 +1,4 @@
-import { cellKey, colToName, formatGeneral, formatValueEx, parseRange, tableAt, type CellStyle, type FormatLocale, type RangeAddress, type Sheet } from '@sheets/core';
+import { cellKey, colToName, MAX_COLS, formatGeneral, formatValueEx, parseRange, tableAt, type CellStyle, type FormatLocale, type RangeAddress, type Sheet } from '@sheets/core';
 import type { Geometry } from './geometry.js';
 
 export interface GridTheme {
@@ -98,6 +98,8 @@ export interface RenderState {
   fillPreview: RangeAddress | null;
   locale: FormatLocale;
   showFillHandle: boolean;
+  /** Cells that hold a hyperlink (drawn underlined in the link color). */
+  isLink?: (row: number, col: number) => boolean;
 }
 
 function luminance(hex: string): number {
@@ -266,7 +268,7 @@ export class GridRenderer {
             nc++;
           }
         }
-        this.drawCellText(vp, state, cell.value, style, cx(c), y, w, h, spill, align);
+        this.drawCellText(vp, state, cell.value, this.linkStyle(state, r, c, style), cx(c), y, w, h, spill, align);
       }
     }
     for (const m of merges) {
@@ -275,7 +277,7 @@ export class GridRenderer {
       if (!cell || cell.value === null) continue;
       const rc = vp.rect(m);
       const align = style?.hAlign ?? (typeof cell.value === 'number' ? 'right' : typeof cell.value === 'string' ? 'left' : 'center');
-      this.drawCellText(vp, state, cell.value, style, rc.x, rc.y, rc.w, rc.h, 0, align);
+      this.drawCellText(vp, state, cell.value, this.linkStyle(state, m.start.row, m.start.col, style), rc.x, rc.y, rc.w, rc.h, 0, align);
     }
 
     // 5. Borders
@@ -305,9 +307,32 @@ export class GridRenderer {
       }
     }
 
-    // 6. Overlays
+    // 6. Note indicators (red triangle in the top-right corner)
+    if (sheet.notes.size) {
+      ctx.fillStyle = '#C00000';
+      for (const key of sheet.notes.keys()) {
+        const row = Math.floor(key / MAX_COLS), col = key % MAX_COLS;
+        if (row < r0 || row > r1 || col < c0 || col > c1) continue;
+        const m = merges.find((mm) => mm.start.row === row && mm.start.col === col);
+        const rc = m ? vp.rect(m) : { x: cx(col), y: ry(row), w: cx(col + 1) - cx(col), h: ry(row + 1) - ry(row) };
+        if (rc.w <= 0 || rc.h <= 0) continue;
+        const size = Math.min(6 * vp.geo.zoom, rc.w / 2, rc.h / 2);
+        ctx.beginPath();
+        ctx.moveTo(rc.x + rc.w - size - 1, rc.y + 1);
+        ctx.lineTo(rc.x + rc.w - 1, rc.y + 1);
+        ctx.lineTo(rc.x + rc.w - 1, rc.y + size + 1);
+        ctx.fill();
+      }
+    }
+
+    // 7. Overlays
     this.drawOverlays(vp, state);
     ctx.restore();
+  }
+
+  private linkStyle(state: RenderState, row: number, col: number, style: CellStyle | undefined): CellStyle | undefined {
+    if (!state.isLink?.(row, col)) return style;
+    return { ...style, underline: true, color: style?.color ?? (this.theme.dark ? '#4DA3FF' : '#0563C1') };
   }
 
   private drawCellText(vp: Viewport, state: RenderState, value: NonNullable<import('@sheets/core').Scalar>, style: CellStyle | undefined, x: number, y: number, w: number, h: number, spill: number, align: string): void {

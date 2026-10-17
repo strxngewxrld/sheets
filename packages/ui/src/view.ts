@@ -1,9 +1,12 @@
 import {
   applyBorders,
   applyStyle,
+  cellKey,
   clearRange,
   copyRange,
   ConditionalFormatEvaluator,
+  evaluate,
+  toText,
   deleteCols,
   deleteRows,
   Emitter,
@@ -26,6 +29,8 @@ import {
   validationListValues,
   isError,
   keyToAddress,
+  parseFormula,
+  walk,
   MAX_COLS,
   MAX_ROWS,
   mergeCells,
@@ -96,6 +101,8 @@ export interface SpreadsheetViewOptions {
   /** Extra buttons at the start of the toolbar (e.g. Open / Save). */
   toolbarActions?: ToolbarAction[];
   theme?: 'auto' | 'light' | 'dark';
+  /** Opens an external hyperlink (default: a new browser window). */
+  onOpenLink?: (url: string) => void;
 }
 
 export interface SelectionInfo {
@@ -173,6 +180,7 @@ export class SpreadsheetView {
   /** An alert from data validation is open (it stays until answered). */
   private alertOpen = false;
   private validationButton!: HTMLButtonElement;
+  private noteEl!: HTMLDivElement;
   private skipValidation = false;
 
   constructor(container: HTMLElement, workbook: Workbook, options: SpreadsheetViewOptions = {}) {
@@ -469,7 +477,11 @@ export class SpreadsheetView {
     this.validationButton.hidden = true;
     this.validationButton.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
     this.validationButton.addEventListener('click', () => this.openValidationList());
-    this.gridEl.append(this.tip, this.validationButton);
+    this.noteEl = document.createElement('div');
+    this.noteEl.className = 'sx-note';
+    this.noteEl.setAttribute('role', 'tooltip');
+    this.noteEl.hidden = true;
+    this.gridEl.append(this.tip, this.validationButton, this.noteEl);
     this.bindGrid();
     this.bindKeyboard();
 
@@ -807,6 +819,7 @@ export class SpreadsheetView {
       fillPreview: this.drag?.kind === 'fill' ? this.drag.target : null,
       locale: this.locale,
       showFillHandle: !this.editor.editing && !this.options.readOnly,
+      isLink: (r, c) => sheet.links.has(cellKey(r, c)) || /^\s*HYPERLINK\s*\(/i.test(sheet.getCell(r, c)?.formula ?? ''),
     });
     this.renderTableControls();
 
@@ -869,7 +882,9 @@ export class SpreadsheetView {
     const sheet = this.sheet;
     const cells = (range.end.row - range.start.row + 1) * (range.end.col - range.start.col + 1);
     if (cells < 2) {
-      this.statusEl.textContent = '';
+      const link = this.linkAt(this.active.row, this.active.col);
+      const hint = /Mac|iPhone|iPad/.test(navigator.platform) ? s.openLinkHint.replace(/^(Ctrl|Strg)/, '⌘') : s.openLinkHint;
+      this.statusEl.textContent = link ? `${link.url ?? link.location} · ${hint}` : '';
       return;
     }
     let sum = 0;
@@ -1279,6 +1294,74 @@ export class SpreadsheetView {
     openValidationDialog(this.root, this.wb, this.sheet.name, this.selectionRange(), this.active, this.locale, this.strings, () => this.focus());
   }
 
+  // =========================================================================
+  // Notes and hyperlinks
+  // =========================================================================
+
+  /** Hyperlink of a cell: a stored link or the target of a HYPERLINK formula. */
+  private linkAt(row: number, col: number): { url?: string; location?: string } | null {
+    const stored = this.sheet.links.get(cellKey(row, col));
+    if (stored) return { ...(stored.target ? { url: stored.target } : {}), ...(stored.location ? { location: stored.location } : {}) };
+    const formula = this.sheet.getCell(row, col)?.formula;
+    if (!formula || !/HYPERLINK\s*\(/i.test(formula)) return null;
+    try {
+      let target: string | null = null;
+      walk(parseFormula(formula), (n) => {
+        if (target === null && n.type === 'func' && n.name === 'HYPERLINK' && n.args[0]) {
+          const ctx = this.wb.calc.contextFor(this.sheet, row, col);
+          const v = evaluate(n.args[0], ctx);
+          const text = toText(Array.isArray(v) ? v[0]?.[0] ?? null : typeof v === 'object' && v && 'kind' in v ? ctx.getCell(v.sheet, v.range.start.row, v.range.start.col) : v);
+          if (typeof text === 'string') target = text;
+        }
+      });
+      if (!target) return null;
+      const t = target as string;
+      return t.startsWith('#') ? { location: t.slice(1) } : { url: t };
+    } catch {
+      return null;
+    }
+  }
+
+  private openLink(link: { url?: string; location?: string }): void {
+    if (link.location) {
+      this.goTo(link.location);
+      this.focus();
+      return;
+    }
+    if (!link.url) return;
+    if (this.options.onOpenLink) this.options.onOpenLink(link.url);
+    else window.open(link.url, '_blank', 'noopener');
+  }
+
+  /** Shows the note of the cell under the mouse. */
+  private hoverNote(x: number, y: number): void {
+    const vp = this.vp;
+    const note = x > vp.headerW && y > vp.headerH ? (() => {
+      const cell = this.cellAt(x, y);
+      const merge = this.sheet.mergeAt(cell.row, cell.col);
+      const at = merge?.start ?? cell;
+      const n = this.sheet.notes.get(cellKey(at.row, at.col));
+      return n ? { n, rect: vp.rect(merge ?? { start: at, end: at }), key: `${at.row}:${at.col}` } : null;
+    })() : null;
+    if (!note) {
+      this.noteEl.hidden = true;
+      return;
+    }
+    if (this.noteEl.hidden || this.noteEl.dataset.cell !== note.key) {
+      const author = document.createElement('strong');
+      author.textContent = note.n.author ? `${note.n.author}:` : '';
+      const body = document.createElement('div');
+      body.textContent = note.n.text;
+      this.noteEl.replaceChildren(...(note.n.author ? [author] : []), body);
+      this.noteEl.dataset.cell = note.key;
+      this.noteEl.hidden = false;
+    }
+    const width = this.noteEl.offsetWidth || 200;
+    const left = note.rect.x + note.rect.w + 6;
+    this.noteEl.style.left = `${left + width > vp.width ? Math.max(4, note.rect.x - width - 6) : left}px`;
+    this.noteEl.style.top = `${Math.max(vp.headerH, Math.min(note.rect.y, vp.height - this.noteEl.offsetHeight - 4))}px`;
+  }
+
   private styleSelection(patch: StylePatch): void {
     this.mutate(() => applyStyle(this.wb, this.sheet.name, this.selectionRange(), patch));
   }
@@ -1540,8 +1623,11 @@ export class SpreadsheetView {
     grid.addEventListener('mousemove', (e) => {
       if (this.drag) return;
       const { x, y } = this.local(e);
-      grid.style.cursor = this.cursorAt(x, y);
+      const onLink = (e.ctrlKey || e.metaKey) && x > this.vp.headerW && y > this.vp.headerH && (() => { const c = this.cellAt(x, y); return !!this.linkAt(c.row, c.col); })();
+      grid.style.cursor = onLink ? 'pointer' : this.cursorAt(x, y);
+      if (!(e.target as HTMLElement).closest('.sx-dialog, .sx-validation-tip')) this.hoverNote(x, y);
     });
+    grid.addEventListener('mouseleave', () => { this.noteEl.hidden = true; });
     grid.addEventListener('dblclick', (e) => {
       const { x, y } = this.local(e);
       const vp = this.vp;
@@ -1652,6 +1738,12 @@ export class SpreadsheetView {
         this.drag = { kind: 'fill', source: this.selectionRange(), target: null };
       } else {
         if (!this.commitEdit()) return;
+        const link = (e.ctrlKey || e.metaKey) && !e.shiftKey ? this.linkAt(cell.row, cell.col) : null;
+        if (link) {
+          this.setSelection(cell, cell);
+          this.openLink(link);
+          return;
+        }
         const merge = this.sheet.mergeAt(cell.row, cell.col);
         if (e.shiftKey) this.setSelection(this.anchor, cell, this.active);
         else if (merge) this.setSelection(merge.start, merge.end, merge.start);

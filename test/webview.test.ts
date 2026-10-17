@@ -7,6 +7,7 @@ import { strToU8, unzipSync, zipSync } from 'fflate';
 const bridge = vi.hoisted(() => ({
   post: vi.fn(),
   commands: [] as string[],
+  options: undefined as undefined | { onOpenLink?: (url: string) => void },
   receive: undefined as ((event: { data: HostToWebview }) => void) | undefined,
 }));
 
@@ -15,7 +16,7 @@ const bridge = vi.hoisted(() => ({
 vi.mock('@sheets/ui', () => ({
   SpreadsheetView: class {
     agentHost = {};
-    constructor(_app: unknown, public workbook: Workbook) {}
+    constructor(_app: unknown, public workbook: Workbook, options: { onOpenLink?: (url: string) => void }) { bridge.options = options; }
     setWorkbook(wb: Workbook) { this.workbook = wb; }
     focus() {}
     runCommand(command: string) { bridge.commands.push(command); }
@@ -52,6 +53,12 @@ describe('VS Code webview commands', () => {
     send({ type: 'command', command: 'find' });
     send({ type: 'command', command: 'replace' });
     expect(bridge.commands).toEqual(['find', 'replace']);
+  });
+
+  it('asks the host to open external links', () => {
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: false });
+    bridge.options!.onOpenLink!('https://example.com');
+    expect(bridge.post).toHaveBeenCalledWith({ type: 'openLink', url: 'https://example.com' });
   });
 });
 

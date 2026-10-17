@@ -195,6 +195,8 @@ export const CSS = `
 .sx-validation-tip .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .sx-validation-tip .sx-actions button { height: 26px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--sx-input-border); background: var(--sx-input-bg); color: inherit; cursor: pointer; font: inherit; }
 .sx-validation-tip .sx-actions button.sx-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
+.sx-note { position: absolute; z-index: 29; max-width: 260px; padding: 6px 8px; background: #FFFFE1; color: #1f1f1f; border: 1px solid #c8c8a0; box-shadow: var(--sx-shadow); font-size: 12px; white-space: pre-wrap; pointer-events: none; display: grid; gap: 2px; }
+.sx-note[hidden] { display: none; }
 .sx-find-dialog { width: 300px; z-index: 51; }
 .sx-find-dialog [hidden] { display: none; }
 .sx-find-dialog input[aria-invalid=true] { border-color: #C00000; }
