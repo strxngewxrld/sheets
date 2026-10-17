@@ -42,15 +42,29 @@ export function releaseNotes(changelog, version, vsixName) {
     `Die Datei \`${vsixName}\` unter Assets herunterladen und in VS Code über „Extensions: Install from VSIX…“ installieren.\n`;
 }
 
-/** Verify lightweight and annotated tags against the exact local build commit. */
+/** Return false for a missing tag; reject existing tags on a different commit. */
 export function verifyRemoteTag(repository, tag, head, read = output) {
-  let object = JSON.parse(read('gh', ['api', `repos/${repository}/git/ref/tags/${tag}`, '--jq', '.object']));
+  const refs = JSON.parse(read('gh', ['api', `repos/${repository}/git/matching-refs/tags/${tag}`]));
+  let object = refs.find((ref) => ref.ref === `refs/tags/${tag}`)?.object;
+  if (!object) return false;
   for (let depth = 0; object.type === 'tag' && depth < 16; depth++) {
     object = JSON.parse(read('gh', ['api', `repos/${repository}/git/tags/${object.sha}`, '--jq', '.object']));
   }
   if (object.type !== 'commit' || object.sha !== head) {
     throw new Error(`Der GitHub-Tag ${tag} zeigt nicht auf den aktuellen Commit. Passenden Release-Commit auschecken.`);
   }
+  return true;
+}
+
+export function tagArgs(repository, tag, head) {
+  return ['api', '--method', 'POST', `repos/${repository}/git/refs`, '-f', `ref=refs/tags/${tag}`, '-f', `sha=${head}`];
+}
+
+/** Create only missing tags, never move or replace an existing version tag. */
+export function ensureRemoteTag(repository, tag, head, read = output) {
+  if (verifyRemoteTag(repository, tag, head, read)) return false;
+  read('gh', tagArgs(repository, tag, head));
+  return true;
 }
 
 export function main() {
@@ -64,13 +78,13 @@ export function main() {
   if (values.help) {
     console.log('npm run publish:github -- [--owner <user-oder-org>] [--dry-run] [--draft]\n' +
       'Lädt die geprüfte VSIX direkt als GitHub-Release-Asset hoch. Keine npm-Veröffentlichung.\n' +
-      'Voraussetzung: GitHub CLI (gh), Anmeldung und gepushter Tag v<package.json-Version> auf HEAD.\n' +
+      'Voraussetzung: GitHub CLI (gh), Anmeldung und gepushter Release-Commit. Der Versionstag wird automatisch auf GitHub angelegt.\n' +
       '--dry-run baut und prüft lokal, schreibt einen Release-Plan und ruft GitHub nicht auf.\n' +
-      '--bump none bleibt kompatibel; Versionsänderungen vorab committen und taggen.');
+      '--bump none bleibt kompatibel; Versionsänderungen vorab committen und pushen.');
     return;
   }
   if (values.bump !== 'none') throw new Error(
-    'Versionen vorab mit npm version patch|minor|major --no-git-tag-version --workspaces=false anheben, Release-Dateien aktualisieren, committen und taggen. Zum Veröffentlichen --bump none verwenden (Standard).',
+    'Versionen vorab mit npm version patch|minor|major --no-git-tag-version --workspaces=false anheben, Release-Dateien aktualisieren, committen und pushen. Zum Veröffentlichen --bump none verwenden (Standard).',
   );
   const dryRun = values['dry-run'];
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -80,12 +94,16 @@ export function main() {
   const head = output('git', ['rev-parse', 'HEAD']);
   const dirty = () => output('git', ['status', '--porcelain']);
   if (!dryRun) {
-    if (dirty()) throw new Error('Vor der Veröffentlichung alle Änderungen committen und den Release-Tag pushen. Für lokale Prüfungen --dry-run verwenden.');
+    if (dirty()) throw new Error('Vor der Veröffentlichung alle Änderungen committen und pushen. Für lokale Prüfungen --dry-run verwenden.');
     try { output('gh', ['--version']); }
     catch { throw new Error('GitHub CLI (gh) installieren und gh auth login ausführen oder GH_TOKEN/GITHUB_TOKEN setzen.'); }
     run('gh', ['auth', 'status', '--hostname', 'github.com']);
+    try {
+      const remoteHead = output('gh', ['api', `repos/${repository}/commits/${head}`, '--jq', '.sha']);
+      if (remoteHead !== head) throw new Error('Commit stimmt nicht überein.');
+    } catch { throw new Error(`Release-Commit ist in ${repository} nicht erreichbar. HEAD vor dem Veröffentlichen pushen und Repository-Zugriff prüfen.`); }
     try { verifyRemoteTag(repository, tag, head); }
-    catch (error) { throw new Error(`Release-Tag prüfen: ${error.message}\nTag ${tag} muss in ${repository} existieren und auf HEAD zeigen.`); }
+    catch (error) { throw new Error(`Release-Tag prüfen: ${error.message}`); }
   } else {
     console.log('Dry-Run: keine Versionsänderung, kein GitHub-Aufruf und kein Upload.');
   }
@@ -109,12 +127,15 @@ export function main() {
   writeFileSync(plan, JSON.stringify({ repository, tag, commit: head, version, asset,
     sha256: createHash('sha256').update(readFileSync(asset)).digest('hex'),
     draft: values.draft, command: ['gh', ...args],
+    tagCommandIfMissing: ['gh', ...tagArgs(repository, tag, head)],
   }, null, 2) + '\n');
   console.log(`\nRelease-Plan: ${plan}`);
   if (dryRun) {
-    console.log(`Geplant: ${repository} / ${tag}${values.draft ? ' (Entwurf)' : ''}, Asset ${vsixName}. Nichts veröffentlicht.`);
+    console.log(`Geplant: ${repository} / ${tag}${values.draft ? ' (Entwurf)' : ''}, Asset ${vsixName}. Fehlenden Tag auf ${head} anlegen. Nichts veröffentlicht.`);
     return;
   }
+  console.log(`\nVersionstag ${tag} prüfen und bei Bedarf auf GitHub anlegen`);
+  ensureRemoteTag(repository, tag, head);
   // gh uploads assets to a draft before publishing; existing releases are not overwritten.
   run('gh', args);
   console.log(`\nFertig: ${repository} / ${tag}${values.draft ? ' (Entwurf)' : ''}`);

@@ -51,7 +51,7 @@ Die Extension-ID bleibt `sheets.sheets-vscode`. Das Repository im Manifest verwe
 # Lokal prüfen: kein Token und keine GitHub CLI nötig, keine Versionsänderung
 npm run publish:github -- --dry-run
 
-# Den vorbereiteten, committeten und getaggten Stand veröffentlichen
+# Den vorbereiteten und gepushten Stand veröffentlichen; Tag wird automatisch angelegt
 npm run publish:github
 
 # Optional nur einen Release-Entwurf mit VSIX anlegen
@@ -60,23 +60,21 @@ npm run publish:github -- --draft
 
 Für einen echten Upload die [GitHub CLI](https://cli.github.com/) installieren und `gh auth login --hostname github.com` ausführen. Alternativ `GH_TOKEN` oder `GITHUB_TOKEN` in der Umgebung setzen. Der Token benötigt Schreibzugriff auf Repository-Inhalte (`Contents: write` bei einem Fine-grained Token; `contents: write` für den Actions-Token). `NODE_AUTH_TOKEN` und `packages: write` werden nicht mehr verwendet. Tokens werden nicht in Dateien geschrieben.
 
-Das Ziel ist standardmäßig `strxngewxrld/sheets`; `--owner` oder `GITHUB_OWNER` können den Owner ändern. Das Skript verlangt ein sauberes Git-Arbeitsverzeichnis und einen bereits gepushten Tag `v<package.json-Version>`, der exakt auf den aktuellen Commit zeigt. Sowohl einfache als auch annotierte Tags werden geprüft. Es erzeugt keine Commits oder Tags und überschreibt keine vorhandenen Releases oder Assets. Ein gescheiterter Upload kann einen Release-Entwurf hinterlassen; diesen vor einer Wiederholung auf GitHub prüfen und gegebenenfalls entfernen.
+Das Ziel ist standardmäßig `strxngewxrld/sheets`; `--owner` oder `GITHUB_OWNER` können den Owner ändern. Das Skript verlangt ein sauberes Git-Arbeitsverzeichnis und einen bereits nach GitHub gepushten Release-Commit. Nach erfolgreichen Tests und Paketprüfung legt es den fehlenden Tag `v<package.json-Version>` auf GitHub exakt auf diesem Commit an. Ein vorhandener einfacher oder annotierter Tag muss auf denselben Commit zeigen; abweichende Tags werden nicht verschoben. Das gilt auch bei `--draft`: Der Tag wird angelegt, der Release bleibt ein Entwurf. Es erzeugt keine Commits und überschreibt keine vorhandenen Releases oder Assets. Der Tag bleibt bestehen, falls der anschließende Release-Upload fehlschlägt, und kann beim nächsten Versuch wiederverwendet werden. Bei Bedarf den neuen Tag lokal mit `git fetch origin --tags` holen. Ein gescheiterter Upload kann einen Release-Entwurf hinterlassen; diesen vor einer Wiederholung auf GitHub prüfen und gegebenenfalls entfernen.
 
 Eine neue Version vorab vorbereiten:
 
 ```bash
 npm version patch --no-git-tag-version --ignore-scripts --workspaces=false
 # CHANGELOG.md und das Installationsbeispiel in README.md aktualisieren
-# Änderungen committen und pushen, dann den passenden Tag anlegen und pushen:
-git tag v<VERSION>
-git push origin v<VERSION>
+# Änderungen committen und pushen; das Publishing legt den Versionstag an
 npm run publish:github
 ```
 
-`<VERSION>` durch die neue Version aus `package.json` ersetzen. Die frühere Option `--bump none` bleibt kompatibel; andere `--bump`-Werte werden mit einem Hinweis auf die Vorbereitung abgelehnt. Standardmäßig wird die bereits vorbereitete Version verwendet.
+Die frühere Option `--bump none` bleibt kompatibel; andere `--bump`-Werte werden mit einem Hinweis auf die Vorbereitung abgelehnt. Standardmäßig wird die bereits vorbereitete Version verwendet.
 
-Der Dry-Run führt alle lokalen Tests und die VSIX-Prüfung aus und schreibt `artifacts/v<version>-release-plan.json` mit Ziel, Commit, Asset, SHA-256 und dem geplanten CLI-Aufruf sowie `artifacts/v<version>-release-notes.md`. Er kontaktiert GitHub nicht und verändert weder Version noch Git-Historie. Remote-Berechtigungen und Tag-Verfügbarkeit werden erst bei einem echten Upload geprüft. Die Release Notes übernehmen den passenden Versionsabschnitt aus `CHANGELOG.md` und ergänzen den VSIX-Installationshinweis. In VS Code steht die Task **Sheets: Publishing-Probelauf** bereit.
+Der Dry-Run führt alle lokalen Tests und die VSIX-Prüfung aus und schreibt `artifacts/v<version>-release-plan.json` mit Ziel, Commit, Asset, SHA-256, der geplanten Tag-Erstellung und dem Release-CLI-Aufruf sowie `artifacts/v<version>-release-notes.md`. Er kontaktiert GitHub nicht und verändert weder Version noch Git-Historie. Remote-Berechtigungen, Commit-Verfügbarkeit und bestehende Tags werden erst bei einem echten Upload geprüft. Die Release Notes übernehmen den passenden Versionsabschnitt aus `CHANGELOG.md` und ergänzen den VSIX-Installationshinweis. In VS Code steht die Task **Sheets: Publishing-Probelauf** bereit.
 
-Die Veröffentlichung nutzt [`gh release create`](https://cli.github.com/manual/gh_release_create) mit `--verify-tag` und dem VSIX-Pfad. Die GitHub CLI lädt Assets zunächst in einen Entwurf und veröffentlicht anschließend; `--draft` lässt den Entwurf bestehen. Die benötigten Berechtigungen beschreibt die [GitHub-Releases-API](https://docs.github.com/en/rest/releases/releases#create-a-release).
+Die Veröffentlichung nutzt [`gh release create`](https://cli.github.com/manual/gh_release_create) mit `--verify-tag` und dem VSIX-Pfad, nachdem der Job den Tag über die [Git-References-API](https://docs.github.com/en/rest/git/refs#create-a-reference) angelegt oder geprüft hat. Die GitHub CLI lädt Assets zunächst in einen Entwurf und veröffentlicht anschließend; `--draft` lässt den Entwurf bestehen. Die benötigten Berechtigungen beschreibt die [GitHub-Releases-API](https://docs.github.com/en/rest/releases/releases#create-a-release).
 
 Bei einem Versionswechsel `package.json`, `package-lock.json`, `CHANGELOG.md` und das Installationsbeispiel in `README.md` aktualisieren.
