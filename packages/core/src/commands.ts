@@ -10,7 +10,7 @@ import {
   type RangeAddress,
 } from './address.js';
 import { chartFromRange, type ChartSpec, type ChartType, type ChartAnchor } from './chart.js';
-import { shiftFormula } from './formula/rewrite.js';
+import { shiftFormula, transposeFormula } from './formula/rewrite.js';
 import { formatValue, getDefaultLocale, parseInput, type FormatLocale } from './numfmt.js';
 import type { CellPatch, Operation } from './ops.js';
 import { Sheet, type CellData } from './sheet.js';
@@ -229,6 +229,14 @@ export function copyRange(wb: Workbook, sheet: string | number, range: RangeAddr
 
 export type PasteMode = 'all' | 'values' | 'formats' | 'formulas';
 
+export interface PasteSpecial {
+  mode?: PasteMode;
+  /** Swap rows and columns. */
+  transpose?: boolean;
+  /** Keep target cells where the source cell is empty. */
+  skipBlanks?: boolean;
+}
+
 /**
  * Pastes clipboard data at the target cell. Relative references in formulas
  * are shifted. If the target selection is a multiple of the source size the
@@ -239,12 +247,13 @@ export function pasteRange(
   clip: ClipboardData,
   sheet: string | number,
   target: RangeAddress,
-  mode: PasteMode = 'all',
+  special: PasteMode | PasteSpecial = 'all',
   options: ApplyOptions = {},
 ): RangeAddress {
+  const { mode = 'all', transpose = false, skipBlanks = false } = typeof special === 'string' ? { mode: special } : special;
   const s = wb.requireSheet(sheet);
-  const srcRows = clip.cells.length;
-  const srcCols = clip.cells[0]?.length ?? 0;
+  const srcRows = transpose ? clip.cells[0]?.length ?? 0 : clip.cells.length;
+  const srcCols = transpose ? clip.cells.length : clip.cells[0]?.length ?? 0;
   const tRows = target.end.row - target.start.row + 1;
   const tCols = target.end.col - target.start.col + 1;
   const repR = tRows % srcRows === 0 ? tRows / srcRows : 1;
@@ -256,16 +265,21 @@ export function pasteRange(
     for (let rc = 0; rc < repC; rc++) {
       clip.cells.forEach((line, i) =>
         line.forEach((src, j) => {
-          const row = target.start.row + rr * srcRows + i;
-          const col = target.start.col + rc * srcCols + j;
+          const [oi, oj] = transpose ? [j, i] : [i, j];
+          const row = target.start.row + rr * srcRows + oi;
+          const col = target.start.col + rc * srcCols + oj;
           if (row >= MAX_ROWS || col >= MAX_COLS) return;
+          if (skipBlanks && (!src || (src.v === undefined && src.f === undefined && (mode !== 'formats' || !src.s)))) return;
           const existing = Sheet.cellToData(s.getCell(row, col));
           let data: CellData | null;
           const dRow = row - (clip.range.start.row + i);
           const dCol = col - (clip.range.start.col + j);
           const shifted: CellData | null = src ? { ...src } : null;
           if (shifted && derived.has(`${i},${j}`) && (mode === 'all' || mode === 'formulas')) delete shifted.v;
-          if (shifted?.f !== undefined) shifted.f = clip.cut ? shifted.f : shiftFormula(shifted.f, dRow, dCol);
+          if (shifted?.f !== undefined && !clip.cut) {
+            const fromRow = clip.range.start.row + i, fromCol = clip.range.start.col + j;
+            shifted.f = transpose ? transposeFormula(shifted.f, fromRow, fromCol, row, col) : shiftFormula(shifted.f, dRow, dCol);
+          }
           switch (mode) {
             case 'values':
               data = { ...(existing?.s ? { s: existing.s } : {}), ...(src?.v !== undefined ? { v: src.v } : {}) };

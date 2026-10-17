@@ -73,6 +73,34 @@ export function shiftFormula(formula: string, dRow: number, dCol: number): strin
   });
 }
 
+/**
+ * Moves a formula from one cell to another while swapping rows and columns
+ * (paste with transpose): fully relative references are mirrored around the
+ * cell, mixed and absolute references are moved like a normal copy.
+ */
+export function transposeFormula(formula: string, fromRow: number, fromCol: number, toRow: number, toCol: number): string {
+  return rewriteRefs(formula, (ref) => {
+    const move = (p: RefPoint): RefPoint => {
+      if (ref.kind === 'cols' || ref.kind === 'rows' || p.absRow || p.absCol) {
+        return {
+          ...p,
+          row: p.absRow || ref.kind === 'cols' ? p.row : p.row + toRow - fromRow,
+          col: p.absCol || ref.kind === 'rows' ? p.col : p.col + toCol - fromCol,
+        };
+      }
+      return { ...p, row: toRow + (p.col - fromCol), col: toCol + (p.row - fromRow) };
+    };
+    const start = move(ref.start);
+    const end = move(ref.end);
+    if (!inBounds(start) || !inBounds(end)) return null;
+    return {
+      ...ref,
+      start: { ...start, row: Math.min(start.row, end.row), col: Math.min(start.col, end.col) },
+      end: { ...end, row: Math.max(start.row, end.row), col: Math.max(start.col, end.col) },
+    };
+  });
+}
+
 export interface StructuralChange {
   sheet: string;
   axis: 'row' | 'col';
