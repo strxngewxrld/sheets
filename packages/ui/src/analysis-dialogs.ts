@@ -1,4 +1,4 @@
-import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, type StylePatch, type Workbook, applyDataValidation, parseInput, validationAt, type DataValidation, type ValidationOperator, type ValidationType } from '@sheets/core';
+import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, hasFormulas, ICON_SETS, type IconSetName, type StylePatch, type Workbook, applyDataValidation, parseInput, validationAt, type DataValidation, type ValidationOperator, type ValidationType } from '@sheets/core';
 import type { Strings } from './i18n.js';
 import { setTableFilter, tableFilterValue, type SheetTable } from '@sheets/core';
 
@@ -328,20 +328,28 @@ export function openConditionalDialog(root: HTMLElement, wb: Workbook, sheetName
   const sheet = wb.requireSheet(sheetName);
   const choose = p.field(s.rule, select([['', s.newRule], ...sheet.conditionalFormats.map((r): [string, string] => [r.id, `${r.range} · ${r.type}`])], ''));
   const range = p.field(s.dataRange, input(formatRange(selection)));
-  const mode = p.field(s.ruleType, select([['greaterThan', s.greaterThan], ['lessThan', s.lessThan], ['between', s.between], ['expression', s.expression], ['colorScale', s.colorScale]], 'greaterThan'));
+  const mode = p.field(s.ruleType, select([['greaterThan', s.greaterThan], ['lessThan', s.lessThan], ['between', s.between], ['expression', s.expression], ['colorScale', s.colorScale], ['dataBar', s.dataBar], ['iconSet', s.iconSet]], 'greaterThan'));
   const first = p.field(s.firstFormula, input('0'));
   const second = p.field(s.secondFormula, input('100'));
   const fill = p.field(s.fillColor, input('#FFF2CC', 'color'));
   const low = p.field(s.lowColor, input('#F8696B', 'color'));
   const middle = p.field(s.middleColor, input('#FFEB84', 'color'));
   const high = p.field(s.highColor, input('#63BE7B', 'color'));
+  const barColor = p.field(s.barColor, input('#638EC6', 'color'));
+  const iconSet = p.field(s.iconSet, select(ICON_SETS.map((set): [string, string] => [set, `${set[0]} ${s.iconSetNames[set.slice(1)] ?? set.slice(1)}`]), '3TrafficLights1'));
+  const reverse = p.field(s.reverseIcons, input('', 'checkbox'));
+  reverse.parentElement!.className = 'sx-check';
   const stop = p.field(s.stopIfTrue, input('', 'checkbox'));
   stop.parentElement!.className = 'sx-check';
   const showFields = () => {
     const scale = mode.value === 'colorScale';
-    for (const el of [first, fill, stop]) el.parentElement!.hidden = scale;
+    const visual = mode.value === 'dataBar' || mode.value === 'iconSet';
+    for (const el of [first, fill]) el.parentElement!.hidden = scale || visual;
+    stop.parentElement!.hidden = scale;
     second.parentElement!.hidden = mode.value !== 'between' && mode.value !== 'notBetween';
     for (const el of [low, middle, high]) el.parentElement!.hidden = !scale;
+    barColor.parentElement!.hidden = mode.value !== 'dataBar';
+    for (const el of [iconSet, reverse]) el.parentElement!.hidden = mode.value !== 'iconSet';
   };
   mode.addEventListener('change', showFields);
   choose.addEventListener('change', () => {
@@ -353,6 +361,10 @@ export function openConditionalDialog(root: HTMLElement, wb: Workbook, sheetName
     mode.value = nextMode;
     if (rule.type === 'colorScale') {
       low.value = rule.colors[0]!; high.value = rule.colors.at(-1)!; middle.value = rule.colors[1]!;
+    } else if (rule.type === 'dataBar') {
+      barColor.value = rule.color;
+    } else if (rule.type === 'iconSet') {
+      iconSet.value = rule.iconSet; reverse.checked = !!rule.reverse;
     } else {
       first.value = rule.formulas[0]!; second.value = rule.formulas[1] ?? '100'; fill.value = rule.style.fill ?? '#FFF2CC';
     }
@@ -375,11 +387,16 @@ export function openConditionalDialog(root: HTMLElement, wb: Workbook, sheetName
   p.finish(() => {
     const previous = sheet.conditionalFormats.find((r) => r.id === choose.value);
     const base = { id: choose.value || `cf-${crypto.randomUUID()}`, range: range.value.trim(), stopIfTrue: stop.checked };
+    const previousStyle = previous && hasFormulas(previous) ? previous.style : {};
     const rule: ConditionalFormatRule = mode.value === 'colorScale'
       ? { ...base, type: 'colorScale', colors: previous?.type === 'colorScale' && previous.colors.length === 2 ? [low.value, high.value] : [low.value, middle.value, high.value] }
-      : mode.value === 'expression'
-        ? { ...base, type: 'expression', formulas: [first.value], style: { ...(previous && previous.type !== 'colorScale' ? previous.style : {}), fill: fill.value.toUpperCase() } }
-        : { ...base, type: 'cellIs', operator: mode.value as ConditionalOperator, formulas: ['between', 'notBetween'].includes(mode.value) ? [first.value, second.value] : [first.value], style: { ...(previous && previous.type !== 'colorScale' ? previous.style : {}), fill: fill.value.toUpperCase() } };
+      : mode.value === 'dataBar'
+        ? { ...(previous?.type === 'dataBar' ? previous : {}), ...base, type: 'dataBar', color: barColor.value.toUpperCase() }
+        : mode.value === 'iconSet'
+          ? { ...base, type: 'iconSet', iconSet: iconSet.value as IconSetName, ...(reverse.checked ? { reverse: true } : {}), ...(previous?.type === 'iconSet' && previous.iconSet === iconSet.value && previous.thresholds ? { thresholds: previous.thresholds } : {}) }
+          : mode.value === 'expression'
+            ? { ...base, type: 'expression', formulas: [first.value], style: { ...previousStyle, fill: fill.value.toUpperCase() } }
+            : { ...base, type: 'cellIs', operator: mode.value as ConditionalOperator, formulas: ['between', 'notBetween'].includes(mode.value) ? [first.value, second.value] : [first.value], style: { ...previousStyle, fill: fill.value.toUpperCase() } };
     setConditionalFormats(wb, sheetName, previous ? sheet.conditionalFormats.map((r) => r.id === previous.id ? rule : r) : [...sheet.conditionalFormats, rule]);
   });
   showFields();

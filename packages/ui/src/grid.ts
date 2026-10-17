@@ -1,5 +1,6 @@
-import { cellKey, colToName, MAX_COLS, formatGeneral, formatValueEx, parseRange, tableAt, type CellStyle, type FormatLocale, type RangeAddress, type Sheet } from '@sheets/core';
+import { cellKey, colToName, MAX_COLS, type CellVisual, formatGeneral, formatValueEx, parseRange, tableAt, type CellStyle, type FormatLocale, type RangeAddress, type Sheet } from '@sheets/core';
 import type { Geometry } from './geometry.js';
+import { drawIcon } from './icon-sets.js';
 
 export interface GridTheme {
   bg: string;
@@ -100,6 +101,8 @@ export interface RenderState {
   showFillHandle: boolean;
   /** Cells that hold a hyperlink (drawn underlined in the link color). */
   isLink?: (row: number, col: number) => boolean;
+  /** Data bars and icons from conditional formatting. */
+  visual?: (row: number, col: number) => CellVisual | undefined;
 }
 
 function luminance(hex: string): number {
@@ -218,6 +221,28 @@ export class GridRenderer {
       }
     }
 
+    // 1b. Data bars (gradient from the bar color to transparent, as in Excel)
+    if (state.visual) {
+      for (let r = r0; r <= r1; r++) {
+        const h = ry(r + 1) - ry(r);
+        if (h <= 0) continue;
+        for (let c = c0; c <= c1; c++) {
+          const bar = state.visual(r, c)?.bar;
+          const w = cx(c + 1) - cx(c);
+          if (!bar || w <= 4 || covered.has(cellKey(r, c))) continue;
+          const len = (w - 4) * (0.1 + 0.9 * bar.fraction);
+          const gradient = ctx.createLinearGradient(cx(c) + 2, 0, cx(c) + 2 + len, 0);
+          gradient.addColorStop(0, bar.color);
+          gradient.addColorStop(1, `${bar.color}33`);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(cx(c) + 2, ry(r) + 2, len, h - 4);
+          ctx.strokeStyle = bar.color;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(Math.round(cx(c) + 2) + 0.5, Math.round(ry(r) + 2) + 0.5, Math.max(0, Math.round(len) - 1), Math.max(0, Math.round(h - 4) - 1));
+        }
+      }
+    }
+
     // 2. Grid lines
     ctx.strokeStyle = t.grid;
     ctx.lineWidth = 1;
@@ -254,6 +279,12 @@ export class GridRenderer {
         if (!cell || cell.value === null) continue;
         let w = cx(c + 1) - cx(c);
         if (w <= 0) continue;
+        const visual = state.visual?.(r, c);
+        if (visual?.icon) {
+          const size = Math.min(16 * vp.geo.zoom, h - 2, w - 2);
+          if (size > 4) drawIcon(ctx, visual.icon.set, visual.icon.index, cx(c) + 2, y + (h - size) / 2, size);
+        }
+        if (visual?.hideValue) continue;
         const table = tableAt(sheet, r, c);
         const tableHeader = table?.headerRow && parseRange(table.range)!.range.start.row === r;
         if (tableHeader) w = Math.max(0, w - 18);

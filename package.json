@@ -652,7 +652,7 @@
         "toolReferenceName": "sheets_set_conditional_formats",
         "canBeReferencedInPrompt": true,
         "userDescription": "Replaces all conditional formatting rules on a sheet",
-        "modelDescription": "Replaces all conditional formatting rules on a sheet. Earlier rules take priority. Supports cellIs comparisons, expression formulas relative to the range top-left, and two/three-color scales. Pass [] to remove all rules.",
+        "modelDescription": "Replaces all conditional formatting rules on a sheet. Earlier rules take priority. Supports cellIs comparisons, expression formulas relative to the range top-left, two/three-color scales, data bars (color, optional min/max thresholds) and icon sets (iconSet, optional thresholds lowest first, reverse). Pass [] to remove all rules.",
         "tags": [
           "spreadsheet",
           "excel",
@@ -686,7 +686,9 @@
                     "enum": [
                       "cellIs",
                       "expression",
-                      "colorScale"
+                      "colorScale",
+                      "dataBar",
+                      "iconSet"
                     ]
                   },
                   "operator": {
@@ -771,6 +773,108 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "color": {
+                    "type": "string",
+                    "description": "Data bar color (#RRGGBB)"
+                  },
+                  "min": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "min",
+                          "max",
+                          "num",
+                          "percent",
+                          "percentile"
+                        ]
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  },
+                  "max": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "min",
+                          "max",
+                          "num",
+                          "percent",
+                          "percentile"
+                        ]
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  },
+                  "iconSet": {
+                    "type": "string",
+                    "enum": [
+                      "3Arrows",
+                      "3ArrowsGray",
+                      "3Flags",
+                      "3TrafficLights1",
+                      "3TrafficLights2",
+                      "3Signs",
+                      "3Symbols",
+                      "3Symbols2",
+                      "3Stars",
+                      "3Triangles",
+                      "4Arrows",
+                      "4ArrowsGray",
+                      "4RedToBlack",
+                      "4Rating",
+                      "4TrafficLights",
+                      "5Arrows",
+                      "5ArrowsGray",
+                      "5Rating",
+                      "5Quarters",
+                      "5Boxes"
+                    ]
+                  },
+                  "thresholds": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "min",
+                            "max",
+                            "num",
+                            "percent",
+                            "percentile"
+                          ]
+                        },
+                        "value": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "description": "One per icon, lowest first; default equal percent steps"
+                  },
+                  "reverse": {
+                    "type": "boolean"
+                  },
+                  "showValue": {
+                    "type": "boolean"
                   },
                   "stopIfTrue": {
                     "type": "boolean"

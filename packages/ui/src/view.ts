@@ -820,6 +820,7 @@ export class SpreadsheetView {
       locale: this.locale,
       showFillHandle: !this.editor.editing && !this.options.readOnly,
       isLink: (r, c) => sheet.links.has(cellKey(r, c)) || /^\s*HYPERLINK\s*\(/i.test(sheet.getCell(r, c)?.formula ?? ''),
+      visual: (r, c) => conditional.visual(sheet, r, c),
     });
     this.renderTableControls();
 

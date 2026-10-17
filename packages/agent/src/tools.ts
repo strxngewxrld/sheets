@@ -7,6 +7,7 @@ import {
   clearRange,
   CONDITIONAL_OPERATORS,
   ConditionalFormatEvaluator,
+  ICON_SETS,
   createPivotTable,
   colToName,
   copyRange,
@@ -80,6 +81,12 @@ export type JsonSchema = {
   minimum?: number;
   maximum?: number;
   default?: unknown;
+};
+
+const THRESHOLD_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: { type: { type: 'string', enum: ['min', 'max', 'num', 'percent', 'percentile'] }, value: { type: 'number' } },
+  required: ['type'],
 };
 
 export interface ToolDefinition {
@@ -452,16 +459,21 @@ export const TOOLS: ToolImpl[] = [
   },
   {
     name: 'set_conditional_formats',
-    description: 'Replaces all conditional formatting rules on a sheet. Earlier rules take priority. Supports cellIs comparisons, expression formulas relative to the range top-left, and two/three-color scales. Pass [] to remove all rules.',
+    description: 'Replaces all conditional formatting rules on a sheet. Earlier rules take priority. Supports cellIs comparisons, expression formulas relative to the range top-left, two/three-color scales, data bars (color, optional min/max thresholds) and icon sets (iconSet, optional thresholds lowest first, reverse). Pass [] to remove all rules.',
     inputSchema: {
       type: 'object', properties: {
         sheet: SHEET_PARAM,
         rules: { type: 'array', items: { type: 'object', properties: {
           id: { type: 'string' }, range: { type: 'string' },
-          type: { type: 'string', enum: ['cellIs', 'expression', 'colorScale'] },
+          type: { type: 'string', enum: ['cellIs', 'expression', 'colorScale', 'dataBar', 'iconSet'] },
           operator: { type: 'string', enum: CONDITIONAL_OPERATORS },
           formulas: { type: 'array', items: { type: 'string' } },
           style: STYLE_SCHEMA, colors: { type: 'array', items: { type: 'string' } },
+          color: { type: 'string', description: 'Data bar color (#RRGGBB)' },
+          min: THRESHOLD_SCHEMA, max: THRESHOLD_SCHEMA,
+          iconSet: { type: 'string', enum: ICON_SETS },
+          thresholds: { type: 'array', items: THRESHOLD_SCHEMA, description: 'One per icon, lowest first; default equal percent steps' },
+          reverse: { type: 'boolean' }, showValue: { type: 'boolean' },
           stopIfTrue: { type: 'boolean' },
         }, required: ['id', 'range', 'type'] } },
       }, required: ['rules'],
