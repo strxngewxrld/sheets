@@ -39,7 +39,7 @@ export function openTableFilterDialog(root: HTMLElement, wb: Workbook, sheetName
 }
 
 export function openPasteSpecialDialog(root: HTMLElement, s: Strings, apply: (special: PasteSpecial) => void, onClose: () => void): void {
-  const p = panel(root, s.pasteSpecial, s, onClose);
+  const p = panel(root, s.pasteSpecial.replace(/…$/, ''), s, onClose);
   const mode = p.field(s.pasteWhat, select([['all', s.pasteAll], ['values', s.pasteValuesOnly], ['formulas', s.pasteFormulas], ['formats', s.pasteFormats]], 'all'));
   const skipBlanks = p.field(s.skipBlanks, input('', 'checkbox')); skipBlanks.parentElement!.className = 'sx-check';
   const transpose = p.field(s.transpose, input('', 'checkbox')); transpose.parentElement!.className = 'sx-check';
