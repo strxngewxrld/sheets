@@ -18,6 +18,7 @@ import {
   insertChartFromRange,
   insertCols,
   insertRows,
+  inputToCellData,
   isDateFormat,
   isError,
   keyToAddress,
@@ -46,13 +47,14 @@ import {
   type ChangeEvent,
   type ClipboardData,
   type FormatLocale,
+  type PasteSpecial,
   type RangeAddress,
   type Sheet,
   type StylePatch,
   type Workbook,
 } from '@sheets/core';
 import { ChartLayer } from './chart-layer.js';
-import { closeAnalysisDialog, openCellFormatDialog, openConditionalDialog, openPivotDialog, openSortDialog, openTableFormatDialog, openTableFilterDialog } from './analysis-dialogs.js';
+import { closeAnalysisDialog, openCellFormatDialog, openConditionalDialog, openPasteSpecialDialog, openPivotDialog, openSortDialog, openTableFormatDialog, openTableFilterDialog } from './analysis-dialogs.js';
 import { currentRegion, resolveSortContext } from './sheet-actions.js';
 export { currentRegion } from './sheet-actions.js';
 import type { ChartTheme } from './charts.js';
@@ -1212,23 +1214,44 @@ export class SpreadsheetView {
     return `<table>${rows.join('')}</table>`;
   }
 
-  private onPaste(text: string | null): void {
+  private onPaste(text: string | null, special: PasteSpecial = {}): void {
     if (this.editor.editing || this.options.readOnly) return;
     const target = this.selectionRange();
     this.mutate(() => {
       if (this.clip && (text === null || normalizeNewlines(text) === normalizeNewlines(this.clipText))) {
-        const pasted = pasteRange(this.wb, this.clip, this.sheet.name, target);
+        const pasted = pasteRange(this.wb, this.clip, this.sheet.name, target, special);
         if (this.clip.cut) this.clip = null;
         this.setSelection(pasted.start, pasted.end);
         return;
       }
       if (!text) return;
       this.clip = null;
+      // External text becomes a clipboard block so paste options apply to it too;
+      // like typing, it keeps the target cells' formatting.
       const rows = parseCsv(text.replace(/\r?\n$/, ''), '\t');
-      setValues(this.wb, this.sheet.name, target.start.row, target.start.col, rows);
-      const end = { row: target.start.row + rows.length - 1, col: target.start.col + Math.max(1, ...rows.map((r) => r.length)) - 1 };
-      this.setSelection(target.start, end);
+      const width = Math.max(1, ...rows.map((r) => r.length));
+      const cells = rows.map((r) => Array.from({ length: width }, (_, i) => (r[i] ? inputToCellData(r[i]!, undefined, this.locale) : null)));
+      const external = { sheet: this.sheet.name, range: { start: target.start, end: { row: target.start.row + rows.length - 1, col: target.start.col + width - 1 } }, cells };
+      const pasted = pasteRange(this.wb, external, this.sheet.name, { start: target.start, end: target.start }, { ...special, mode: 'formulas' });
+      this.setSelection(pasted.start, pasted.end);
     });
+  }
+
+  /** Pastes from the system clipboard (or the internal clipboard) with paste options. */
+  async pasteSpecial(special?: PasteSpecial): Promise<void> {
+    if (this.editor.editing || this.options.readOnly) return;
+    let text: string | null = null;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      text = null;
+    }
+    if (special) {
+      this.onPaste(text, special);
+      return;
+    }
+    this.charts.closeEditor();
+    openPasteSpecialDialog(this.root, this.strings, (options) => this.onPaste(text, options), () => this.focus());
   }
 
   // =========================================================================
@@ -1505,19 +1528,9 @@ export class SpreadsheetView {
     const entries: MenuEntry[] = [
       { label: s.cut, disabled: ro, action: () => document.execCommand('cut') },
       { label: s.copy, action: () => document.execCommand('copy') },
-      {
-        label: s.paste,
-        disabled: ro,
-        action: async () => {
-          let text: string | null = null;
-          try {
-            text = await navigator.clipboard.readText();
-          } catch {
-            text = null;
-          }
-          this.onPaste(text);
-        },
-      },
+      { label: s.paste, disabled: ro, action: () => void this.pasteSpecial({}) },
+      { label: s.pasteValues, disabled: ro, action: () => void this.pasteSpecial({ mode: 'values' }) },
+      { label: s.pasteSpecial, disabled: ro, action: () => void this.pasteSpecial() },
       'separator',
       { label: s.insertRowAbove, disabled: ro, action: () => this.mutate(() => insertRows(this.wb, name, sel.start.row, rows)) },
       { label: s.insertRowBelow, disabled: ro, action: () => this.mutate(() => insertRows(this.wb, name, sel.end.row + 1, rows)) },
@@ -1666,6 +1679,12 @@ export class SpreadsheetView {
       // Ctrl+F finds; Ctrl+H (and Cmd+Option+F on macOS, as in VS Code) replaces.
       e.preventDefault();
       this.openFind(e.code === 'KeyH' || e.altKey);
+      return;
+    }
+    if (mod && e.code === 'KeyV' && (e.shiftKey || e.altKey)) {
+      // Ctrl+Shift+V pastes values, Ctrl+Alt+V opens the paste options.
+      e.preventDefault();
+      void this.pasteSpecial(e.altKey ? undefined : { mode: 'values' });
       return;
     }
     if (mod && !e.altKey && (e.code === 'Digit9' || e.code === 'Digit0')) {

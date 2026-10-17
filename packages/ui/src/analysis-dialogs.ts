@@ -1,4 +1,4 @@
-import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type SortKey, type StylePatch, type Workbook } from '@sheets/core';
+import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, type StylePatch, type Workbook } from '@sheets/core';
 import type { Strings } from './i18n.js';
 import { setTableFilter, tableFilterValue, type SheetTable } from '@sheets/core';
 
@@ -36,6 +36,14 @@ export function openTableFilterDialog(root: HTMLElement, wb: Workbook, sheetName
   p.button(s.clearFilter, () => { setTableFilter(wb, sheetName, table.name, column, null); p.close(); });
   p.finish(() => setTableFilter(wb, sheetName, table.name, column, [...values.keys()].every((v) => selected.has(v)) ? null : [...selected]));
   render();
+}
+
+export function openPasteSpecialDialog(root: HTMLElement, s: Strings, apply: (special: PasteSpecial) => void, onClose: () => void): void {
+  const p = panel(root, s.pasteSpecial, s, onClose);
+  const mode = p.field(s.pasteWhat, select([['all', s.pasteAll], ['values', s.pasteValuesOnly], ['formulas', s.pasteFormulas], ['formats', s.pasteFormats]], 'all'));
+  const skipBlanks = p.field(s.skipBlanks, input('', 'checkbox')); skipBlanks.parentElement!.className = 'sx-check';
+  const transpose = p.field(s.transpose, input('', 'checkbox')); transpose.parentElement!.className = 'sx-check';
+  p.finish(() => apply({ mode: mode.value as PasteSpecial['mode'] & string, skipBlanks: skipBlanks.checked, transpose: transpose.checked }));
 }
 
 export function closeAnalysisDialog(root: HTMLElement): void {
