@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const projects = ['.', 'packages/core', 'packages/ui', 'packages/agent', 'packages/mcp', 'apps/web'];
+const projects = ['.', 'packages/core', 'packages/ui', 'packages/agent', 'packages/mcp'];
 for (const project of [...projects, 'apps/vscode']) {
   const dir = join(root, project);
   for (const output of ['dist', 'dist-types']) await rm(join(dir, output), { recursive: true, force: true });

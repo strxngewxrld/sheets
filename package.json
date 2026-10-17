@@ -5,19 +5,18 @@
     "packages/core",
     "packages/agent",
     "packages/ui",
-    "packages/mcp",
-    "apps/web"
+    "packages/mcp"
   ],
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "npm run typecheck && node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "dev": "npm run watch",
-    "dev:web": "npm run dev -w @sheets/web",
-    "build:all": "npm run build && npm run build -w @sheets/web && npm run build -w @sheets/mcp",
+    "build:all": "npm run build && npm run build -w @sheets/mcp",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "package": "node scripts/package.mjs",
+    "publish:github": "node tools/publish-github.mjs",
     "check:package": "node scripts/check-package.mjs",
     "icon": "node scripts/icon.mjs",
     "clean": "node scripts/clean.mjs",
@@ -41,6 +40,10 @@
   "description": "%extension.description%",
   "version": "0.2.3",
   "publisher": "sheets",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strxngewxrld/sheets.git"
+  },
   "license": "MIT",
   "engines": {
     "vscode": "^1.95.0",

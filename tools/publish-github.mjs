@@ -1,152 +1,125 @@
 #!/usr/bin/env node
 /**
- * Die Extension als VSIX bauen und in die GitHub Package Registry stellen.
+ * Sheets als geprüftes VSIX in einer npm-Hülle auf GitHub Packages bereitstellen.
+ * Aufruf: npm run publish:github -- [--owner <user-oder-org>]
+ *   [--bump patch|minor|major|none] [--dry-run]
  *
- * GitHub Packages kennt kein VSIX-Format. Veroeffentlicht wird deshalb ein
- * npm-Paket `@<owner>/vscode-rdp`, das genau eine Datei enthaelt: das VSIX.
- * Das Manifest der Extension bleibt dabei unangetastet - ein Paketname mit
- * Scope wuerde die Extension-ID aendern, und `vsce` lehnt ihn ohnehin ab.
- *
- * Aufruf (normalerweise ueber den VS-Code-Task "RDP: Veröffentlichen"):
- *
- *   NODE_AUTH_TOKEN=<PAT mit write:packages> \
- *     node tools/publish-github.mjs --owner <user-oder-org> [--bump patch|minor|major|none] [--dry-run]
- *
- * Ablauf: Arbeitsverzeichnis sauber? -> Version anheben -> bauen -> testen
- * -> VSIX packen -> npm-Huelle schreiben -> veroeffentlichen. Geht ein
- * Schritt schief, bricht das Skript ab; eine bereits angehobene Version
- * bleibt stehen und wird beim naechsten Versuch mit `--bump none` genommen.
+ * Standard: Patch-Version anheben. --bump none nutzt die vorbereitete Version.
+ * Ein Dry-Run verändert weder Version noch Git-Historie und lädt nichts hoch.
+ * Es werden keine Commits, Tags, GitHub Releases oder Marketplace-Releases angelegt.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
-const wurzel = join(dirname(fileURLToPath(import.meta.url)), '..');
-const extensionOrdner = join(wurzel, 'packages', 'vscode-rdp');
-const huelle = join(wurzel, 'dist-publish');
-const REGISTRY = 'https://npm.pkg.github.com';
+const root = fileURLToPath(new URL('..', import.meta.url));
+const output = join(root, 'artifacts', 'github-package');
+const registry = 'https://npm.pkg.github.com';
+const manifestPath = join(root, 'package.json');
+const readManifest = () => JSON.parse(readFileSync(manifestPath, 'utf8'));
 
-function argument(name) {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+function run(command, args, options = {}) {
+  return execFileSync(command, args, { cwd: root, stdio: 'inherit', ...options });
 }
-
-function abbruch(meldung) {
-  console.error(`\nAbbruch: ${meldung}`);
-  process.exit(1);
+function npm(args, options = {}) {
+  // npm run provides the CLI path; using Node avoids Windows .cmd quoting issues.
+  if (process.env.npm_execpath) return run(process.execPath, [process.env.npm_execpath, ...args], options);
+  return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+    shell: process.platform === 'win32', ...options,
+  });
 }
+function step(title) { console.log(`\n${title}`); }
 
-function schritt(titel) {
-  console.log(`\n=== ${titel}`);
-}
+function main() {
+  const { values } = parseArgs({ options: {
+    owner: { type: 'string' }, bump: { type: 'string', default: 'patch' },
+    'dry-run': { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h' },
+  } });
+  if (values.help) {
+    console.log('npm run publish:github -- [--owner <user-oder-org>] [--bump patch|minor|major|none] [--dry-run]\n' +
+      'Owner: --owner, GITHUB_OWNER oder Repository-Owner. Bump: patch (Standard).\n' +
+      'Token: NODE_AUTH_TOKEN oder GITHUB_TOKEN; für lokale Uploads PAT (classic) mit write:packages.\n' +
+      'Dry-Run: lokale Tests, VSIX-Prüfung und npm publish --dry-run; keine Versionsänderung und kein Upload.');
+    return;
+  }
+  const bump = values.bump;
+  const dryRun = values['dry-run'];
+  if (!['patch', 'minor', 'major', 'none'].includes(bump)) throw new Error('Ungültiger --bump (patch, minor, major oder none).');
 
-/** npm und npx laufen unter Windows nur als .cmd. */
-function npmBefehl(name) {
-  return process.platform === 'win32' ? `${name}.cmd` : name;
-}
+  const initial = readManifest();
+  const source = typeof initial.repository === 'string' ? initial.repository : initial.repository?.url;
+  const remote = source || run('git', ['remote', 'get-url', 'origin'], { stdio: 'pipe', encoding: 'utf8' }).trim();
+  const match = /^(?:git\+https:\/\/github\.com\/|https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([a-z\d-]+)\/([a-z\d_.-]+?)\/?$/i.exec(remote.replace(/\.git\/?$/, ''));
+  if (!match) throw new Error('Kein GitHub-Repository gefunden. repository.url oder origin auf das GitHub-Repo setzen.');
+  const repository = { type: 'git', url: `git+https://github.com/${match[1]}/${match[2]}.git` };
+  const owner = (values.owner ?? process.env.GITHUB_OWNER ?? match[1]).trim().toLowerCase();
+  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/.test(owner)) throw new Error('Ungültiger GitHub-Owner.');
+  const token = process.env.NODE_AUTH_TOKEN || process.env.GITHUB_TOKEN || '';
+  if (!token && !dryRun) throw new Error('NODE_AUTH_TOKEN oder GITHUB_TOKEN für GitHub Packages setzen (write:packages).');
 
-function fuehreAus(befehl, args, opts = {}) {
-  execFileSync(befehl, args, { stdio: 'inherit', cwd: wurzel, shell: process.platform === 'win32', ...opts });
-}
+  step('Arbeitsverzeichnis prüfen');
+  const dirty = run('git', ['status', '--porcelain'], { stdio: 'pipe', encoding: 'utf8' }).trim();
+  if (dirty && !dryRun) throw new Error('Es gibt nicht committete Änderungen. Vor der Veröffentlichung committen oder zunächst --dry-run verwenden.');
+  if (dirty) console.log('Dry-Run mit lokalen Änderungen; keine Versionsänderung und kein Upload.');
 
-function ausgabe(befehl, args) {
-  return execFileSync(befehl, args, { cwd: wurzel, encoding: 'utf8' }).trim();
-}
+  step('Tests ausführen');
+  npm(['test']);
+  if (bump !== 'none' && !dryRun) {
+    step(`Root-Version anheben (${bump})`);
+    npm(['version', bump, '--no-git-tag-version', '--ignore-scripts', '--workspaces=false']);
+    console.log('Bei späterem Abbruch bleibt die angehobene Version bestehen. Wiederholung mit --bump none.');
+  }
+  const manifest = readManifest();
+  const version = manifest.version;
+  const vsixName = `${manifest.name}-${version}.vsix`;
+  const packageName = `@${owner}/${manifest.name}`;
 
-// ----------------------------------------------------------------- Eingaben
+  step(`VSIX bauen und prüfen (${vsixName})`);
+  // Runs the existing typecheck/build/vsce pipeline and the actual VSIX verifier.
+  npm(['run', 'package']);
 
-const owner = (argument('owner') ?? process.env.GITHUB_OWNER ?? '').trim().toLowerCase();
-const bump = argument('bump') ?? 'patch';
-const probelauf = process.argv.includes('--dry-run');
-const token = process.env.NODE_AUTH_TOKEN || process.env.GITHUB_TOKEN || '';
+  step(`GitHub-Package vorbereiten (${packageName}@${version})`);
+  rmSync(output, { recursive: true, force: true });
+  mkdirSync(output, { recursive: true });
+  copyFileSync(join(root, 'artifacts', vsixName), join(output, vsixName));
+  copyFileSync(join(root, 'LICENSE'), join(output, 'LICENSE'));
+  copyFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), join(output, 'THIRD_PARTY_NOTICES.md'));
+  writeFileSync(join(output, 'package.json'), JSON.stringify({
+    name: packageName, version,
+    description: `${manifest.displayName} – VS-Code-Extension als VSIX`,
+    license: manifest.license,
+    ...(manifest.author ? { author: manifest.author } : {}),
+    repository,
+    files: [vsixName, 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
+    publishConfig: { registry },
+  }, null, 2) + '\n');
+  writeFileSync(join(output, 'README.md'), `# ${manifest.displayName} ${version}\n\n` +
+    'Dieses Paket enthält die Extension als VSIX, keine JavaScript-Bibliothek.\n' +
+    `Quellcode: https://github.com/${match[1]}/${match[2]}\n\n` +
+    'Mit einem GitHub-Token mit read:packages anmelden und installieren:\n\n```sh\n' +
+    `npm login --scope=@${owner} --auth-type=legacy --registry=${registry}\n` +
+    `npm pack ${packageName}@${version} --registry=${registry}\n` +
+    `tar -xzf ${owner}-${manifest.name}-${version}.tgz package/${vsixName}\n` +
+    `code --install-extension package/${vsixName}\n` + '```\n');
+  // Only a placeholder is written. Never persist the credential itself.
+  writeFileSync(join(output, '.npmrc'),
+    `@${owner}:registry=${registry}\n//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}\n`);
 
-if (!/^[a-z0-9](?:[a-z0-9-]{0,38})$/.test(owner)) {
-  abbruch('--owner fehlt oder ist kein gültiger GitHub-Benutzer- bzw. Organisationsname.');
-}
-if (!['patch', 'minor', 'major', 'none'].includes(bump)) {
-  abbruch(`--bump "${bump}" ist unbekannt (patch, minor, major oder none).`);
-}
-if (!token && !probelauf) {
-  abbruch('Kein Token. NODE_AUTH_TOKEN oder GITHUB_TOKEN setzen (Personal Access Token mit write:packages).');
-}
-
-// ----------------------------------------------------------------- Ablauf
-
-schritt('Arbeitsverzeichnis prüfen');
-const offen = ausgabe('git', ['status', '--porcelain']);
-if (offen && !probelauf) {
-  abbruch(`Es gibt nicht committete Änderungen - veröffentlicht wird nur, was im Repository steht:\n${offen}`);
-}
-
-// Ein Probelauf hebt nichts an: er soll das Repository so lassen, wie er es fand.
-if (bump !== 'none' && !probelauf) {
-  schritt(`Version anheben (${bump})`);
-  fuehreAus(npmBefehl('npm'), ['version', bump, '--no-git-tag-version', '-w', 'vscode-rdp']);
-}
-const manifest = JSON.parse(readFileSync(join(extensionOrdner, 'package.json'), 'utf8'));
-const version = manifest.version;
-const vsixName = `vscode-rdp-${version}.vsix`;
-
-schritt('Bauen');
-fuehreAus(npmBefehl('npm'), ['run', 'build']);
-
-schritt('Testen');
-fuehreAus(npmBefehl('npm'), ['test']);
-
-schritt(`VSIX packen (${vsixName})`);
-rmSync(huelle, { recursive: true, force: true });
-mkdirSync(huelle, { recursive: true });
-fuehreAus(npmBefehl('npx'), ['--yes', '@vscode/vsce', 'package', '--no-dependencies', '-o', join(huelle, vsixName)], {
-  cwd: extensionOrdner,
-});
-
-schritt('npm-Hülle schreiben');
-const paketname = `@${owner}/vscode-rdp`;
-writeFileSync(
-  join(huelle, 'package.json'),
-  JSON.stringify(
-    {
-      name: paketname,
-      version,
-      description: `${manifest.displayName} - VS-Code-Extension als VSIX (${vsixName})`,
-      license: manifest.license,
-      author: manifest.author,
-      // Daran verknuepft GitHub Packages das Paket mit dem Repository.
-      repository: manifest.repository,
-      files: [vsixName, 'README.md'],
-      publishConfig: { registry: REGISTRY },
-    },
-    null,
-    2,
-  ) + '\n',
-);
-writeFileSync(
-  join(huelle, 'README.md'),
-  `# ${manifest.displayName} ${version}\n\n` +
-    'Dieses Paket enthält nur die VS-Code-Extension als VSIX. Installieren:\n\n' +
-    '```sh\n' +
-    `npm pack ${paketname}@${version} --registry ${REGISTRY}\n` +
-    `tar -xzf ${owner}-vscode-rdp-${version}.tgz package/${vsixName}\n` +
-    `code --install-extension package/${vsixName}\n` +
-    '```\n',
-);
-// Das Token kommt aus der Umgebung und landet nie in einer Datei.
-writeFileSync(
-  join(huelle, '.npmrc'),
-  `@${owner}:registry=${REGISTRY}\n//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}\n`,
-);
-
-schritt(probelauf ? 'Probelauf: npm publish --dry-run' : `Veröffentlichen als ${paketname}@${version}`);
-fuehreAus(npmBefehl('npm'), ['publish', ...(probelauf ? ['--dry-run'] : [])], {
-  cwd: huelle,
-  env: { ...process.env, NODE_AUTH_TOKEN: token || 'probelauf' },
-});
-
-console.log(`\nFertig: ${paketname}@${version}${probelauf ? ' (Probelauf, nichts hochgeladen)' : ''}`);
-if (bump !== 'none' && !probelauf) {
-  console.log(
-    `Die Versionsnummer in packages/vscode-rdp/package.json ist jetzt ${version}. Committen und taggen:\n` +
-      `  git commit -am "Release ${version}" && git tag v${version}`,
+  step(dryRun ? 'Probelauf: npm publish --dry-run' : `Veröffentlichen: ${packageName}@${version}`);
+  npm(['publish', '--registry', registry, '--workspaces=false', '--ignore-scripts', ...(dryRun ? ['--dry-run'] : [])], {
+    cwd: output, env: { ...process.env, NODE_AUTH_TOKEN: dryRun ? 'dry-run' : token },
+  });
+  console.log(`\nFertig: ${packageName}@${version}${dryRun ? ' (Dry-Run, nichts hochgeladen)' : ''}`);
+  console.log(`Paketinhalt: ${output}`);
+  if (bump !== 'none' && !dryRun) console.log(
+    `Version ${version} steht in package.json und package-lock.json. README-Installationsbeispiel und CHANGELOG aktualisieren, danach committen und bei Bedarf taggen.`,
   );
+}
+
+try { main(); }
+catch (error) {
+  console.error(`\nAbbruch: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 }
