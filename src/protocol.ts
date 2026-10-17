@@ -11,10 +11,14 @@ export interface InitMessage {
   backup?: boolean;
 }
 
+/** Editor commands bound to VS Code keybindings (see package.json). */
+export type ViewCommand = 'find' | 'replace';
+
 export type HostToWebview =
   | InitMessage
   | { type: 'undo' }
   | { type: 'redo' }
+  | { type: 'command'; command: ViewCommand }
   | { type: 'request'; id: number; method: 'getFileData' | 'getBackupData' }
   | { type: 'request'; id: number; method: 'executeTool'; params: { name: string; input: unknown } };
 

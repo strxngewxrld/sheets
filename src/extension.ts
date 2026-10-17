@@ -46,6 +46,9 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
       const csv = /\.(csv|tsv)$/i.test(target.path);
       await vscode.commands.executeCommand('vscode.openWith', target, csv ? 'sheets.csv' : 'sheets.spreadsheet');
     }),
+    ...(['find', 'replace'] as const).map((command) =>
+      vscode.commands.registerCommand(`sheets.${command}`, () => provider.activeDocument?.post({ type: 'command', command })),
+    ),
     // Command interface for other extensions / automation:
     //   vscode.commands.executeCommand('sheets.executeTool', { name, input, file })
     vscode.commands.registerCommand('sheets.executeTool', (args: { name: string; input?: Record<string, unknown>; file?: string }) =>

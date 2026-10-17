@@ -6,6 +6,7 @@ import { strToU8, unzipSync, zipSync } from 'fflate';
 
 const bridge = vi.hoisted(() => ({
   post: vi.fn(),
+  commands: [] as string[],
   receive: undefined as ((event: { data: HostToWebview }) => void) | undefined,
 }));
 
@@ -17,6 +18,7 @@ vi.mock('@sheets/ui', () => ({
     constructor(_app: unknown, public workbook: Workbook) {}
     setWorkbook(wb: Workbook) { this.workbook = wb; }
     focus() {}
+    runCommand(command: string) { bridge.commands.push(command); }
   },
 }));
 
@@ -34,6 +36,7 @@ function response(id: number): Extract<WebviewToHost, { type: 'response' }> {
 beforeEach(async () => {
   vi.resetModules();
   bridge.post.mockClear();
+  bridge.commands.length = 0;
   bridge.receive = undefined;
   vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage: bridge.post }));
   vi.stubGlobal('document', { getElementById: () => ({}) });
@@ -42,6 +45,15 @@ beforeEach(async () => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('VS Code webview commands', () => {
+  it('forwards keybinding commands to the view', () => {
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: false });
+    send({ type: 'command', command: 'find' });
+    send({ type: 'command', command: 'replace' });
+    expect(bridge.commands).toEqual(['find', 'replace']);
+  });
+});
 
 describe('VS Code webview file lifecycle', () => {
   it('refuses a lossy save but retains unsaved changes and original parts in hot-exit backup', () => {

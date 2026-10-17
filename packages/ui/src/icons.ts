@@ -14,5 +14,6 @@ export const ICONS = {
   sortAsc: svg('<path d="M4 2v12M1.5 11.5 4 14l2.5-2.5"/><path d="M9 3h5M9 7h4M9 11h3"/>'),
   sortDesc: svg('<path d="M4 2v12M1.5 11.5 4 14l2.5-2.5"/><path d="M9 3h3M9 7h4M9 11h5"/>'),
   fill: svg('<path d="m3 7.5 5-5 5 5-5 5z"/><path d="M13 9.5s1.5 1.7 1.5 2.7a1.5 1.5 0 0 1-3 0c0-1 1.5-2.7 1.5-2.7z" fill="currentColor" stroke="none"/>'),
+  search: svg('<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/>'),
   freeze: svg('<rect x="2" y="2" width="12" height="12" rx="1"/><path d="M2 6h12M6 2v12" stroke-width="2"/>'),
 };

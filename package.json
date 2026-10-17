@@ -104,6 +104,16 @@
         "command": "sheets.openWithSheets",
         "title": "%command.openWithSheets%",
         "category": "Sheets"
+      },
+      {
+        "command": "sheets.find",
+        "title": "%command.find%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.replace",
+        "title": "%command.replace%",
+        "category": "Sheets"
       }
     ],
     "menus": {
@@ -119,6 +129,16 @@
           "command": "sheets.openWithSheets",
           "when": "resourceExtname =~ /\\.(csv|tsv|xlsx)$/ && activeCustomEditorId != sheets.spreadsheet && activeCustomEditorId != sheets.csv",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sheets.find",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.replace",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
         }
       ]
     },
@@ -1973,6 +1993,20 @@
             }
           }
         }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "sheets.find",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      },
+      {
+        "command": "sheets.replace",
+        "key": "ctrl+h",
+        "mac": "cmd+alt+f",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
       }
     ]
   },

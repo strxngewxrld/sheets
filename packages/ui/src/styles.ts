@@ -181,6 +181,10 @@ export const CSS = `
 .sx-dialog .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .sx-dialog .sx-actions button { height: 28px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--sx-input-border); background: var(--sx-input-bg); color: inherit; cursor: pointer; font: inherit; }
 .sx-dialog .sx-actions button.sx-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
+.sx-find-dialog { width: 300px; z-index: 51; }
+.sx-find-dialog [hidden] { display: none; }
+.sx-find-dialog input[aria-invalid=true] { border-color: #C00000; }
+.sx-find-status { min-height: 16px; color: var(--sx-muted); font-size: 12px; }
 .sx-analysis-dialog { max-height: calc(100% - 32px); overflow: auto; }
 .sx-analysis-dialog [hidden] { display: none; }
 .sx-analysis-dialog select[multiple] { height: auto; min-height: 72px; padding: 4px; }

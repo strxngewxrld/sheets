@@ -52,6 +52,7 @@ import { currentRegion, resolveSortContext } from './sheet-actions.js';
 export { currentRegion } from './sheet-actions.js';
 import type { ChartTheme } from './charts.js';
 import { CellEditor, formulaHighlights } from './editor.js';
+import { openFindDialog, type FindDialog } from './find-dialog.js';
 import { Geometry } from './geometry.js';
 import { DEFAULT_CELL_FONT, GridRenderer, Viewport, type GridTheme } from './grid.js';
 import { getStrings, type Strings } from './i18n.js';
@@ -90,6 +91,9 @@ export interface SelectionInfo {
   range: RangeAddress;
   active: CellAddress;
 }
+
+/** Commands a host (e.g. VS Code keybindings) can trigger in the view. */
+export type ViewCommand = 'find' | 'replace';
 
 export type ViewEvents = {
   selectionChange: SelectionInfo;
@@ -147,6 +151,7 @@ export class SpreadsheetView {
   private theme!: GridTheme;
   private disposers: (() => void)[] = [];
   private wbOff: (() => void) | null = null;
+  private findDialog: FindDialog | null = null;
 
   constructor(container: HTMLElement, workbook: Workbook, options: SpreadsheetViewOptions = {}) {
     injectStyles(container.ownerDocument);
@@ -191,9 +196,43 @@ export class SpreadsheetView {
     return this.wb.activeSheet;
   }
 
+  /** Opens the find panel (or the find and replace panel) for the selection's text. */
+  openFind(replace = false): void {
+    if (this.editor.editing) this.commitEdit();
+    closeMenu();
+    if (this.findDialog?.element.isConnected) {
+      this.findDialog.setReplace(replace);
+      return;
+    }
+    this.findDialog = openFindDialog(this.root, {
+      workbook: () => this.wb,
+      position: () => ({ sheet: this.sheet.name, ...this.active }),
+      reveal: (m) => {
+        if (m.sheet.toUpperCase() !== this.sheet.name.toUpperCase()) this.activateSheet(m.sheet);
+        const cell = { row: m.row, col: m.col };
+        this.setSelection(cell, cell);
+        this.scrollIntoView(m.row, m.col);
+      },
+      readOnly: !!this.options.readOnly,
+      onClose: () => {
+        this.findDialog = null;
+        this.focus();
+      },
+    }, this.strings, replace);
+  }
+
+  /** Runs a host command such as find or replace. */
+  runCommand(command: ViewCommand): void {
+    switch (command) {
+      case 'find': this.openFind(false); break;
+      case 'replace': this.openFind(true); break;
+    }
+  }
+
   /** Replaces the displayed workbook (e.g. after opening a file). */
   setWorkbook(wb: Workbook): void {
     closeAnalysisDialog(this.root);
+    this.findDialog?.close();
     this.wbOff?.();
     this.wb = wb;
     this.bindWorkbook();
@@ -264,6 +303,7 @@ export class SpreadsheetView {
 
   destroy(): void {
     cancelAnimationFrame(this.frame);
+    this.findDialog?.close();
     this.disposers.forEach((d) => d());
     this.wbOff?.();
     this.root.remove();
@@ -283,6 +323,7 @@ export class SpreadsheetView {
     this.chartsDirty = true;
     if (this.wb.activeSheetIndex >= this.wb.sheets.length) this.wb.activeSheetIndex = this.wb.sheets.length - 1;
     if (e.structural) this.renderTabs();
+    this.findDialog?.refresh();
     this.scheduleRender();
   }
 
@@ -502,6 +543,7 @@ export class SpreadsheetView {
     button('sortDesc', s.sortDesc, ICONS.sortDesc, () => this.sortSelection(true), true);
     button('sort', s.sort, s.sort, () => this.openSort());
     button('freeze', s.freeze, ICONS.freeze, () => this.toggleFreeze(), true);
+    button('find', s.findReplace, ICONS.search, () => this.openFind(!this.options.readOnly), true);
     sep();
     const chartBtn = button('chart', s.chart, `${ICONS.chart}<span>${escapeHtml(s.chartEditor)}</span>`, (b) => {
       const r = b.getBoundingClientRect();
@@ -1462,6 +1504,7 @@ export class SpreadsheetView {
       { label: s.formatCells, disabled: ro, action: () => this.openCellFormats() },
       { label: s.formatTable, disabled: ro, action: () => this.openTableFormats() },
       { label: s.chart, disabled: ro, action: () => this.insertChart('column') },
+      { label: `${s.findReplace}…`, action: () => this.openFind(!ro) },
       'separator',
       { label: s.clearContents, disabled: ro, action: () => this.mutate(() => clearRange(this.wb, name, sel, 'contents')) },
       { label: s.clearFormats, disabled: ro, action: () => this.mutate(() => clearRange(this.wb, name, sel, 'formats')) },
@@ -1585,6 +1628,12 @@ export class SpreadsheetView {
     }
 
     // ---- Not editing: navigation and shortcuts ----
+    if (mod && !e.shiftKey && (e.code === 'KeyF' || e.code === 'KeyH')) {
+      // Ctrl+F finds; Ctrl+H (and Cmd+Option+F on macOS, as in VS Code) replaces.
+      e.preventDefault();
+      this.openFind(e.code === 'KeyH' || e.altKey);
+      return;
+    }
     if (mod && !e.altKey) {
       const k = e.key.toLowerCase();
       if (k === '1') { e.preventDefault(); this.openCellFormats(); return; }

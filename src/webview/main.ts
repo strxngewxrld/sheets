@@ -82,6 +82,9 @@ window.addEventListener('message', (event: MessageEvent<HostToWebview>) => {
     case 'redo':
       view?.workbook.redo();
       break;
+    case 'command':
+      view?.runCommand(msg.command);
+      break;
     case 'request':
       try {
         if (!view || !agent) throw new Error('Workbook not loaded');
