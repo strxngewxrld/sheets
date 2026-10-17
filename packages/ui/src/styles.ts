@@ -189,7 +189,7 @@ export const CSS = `
 .sx-find-dialog input[aria-invalid=true] { border-color: #C00000; }
 .sx-find-status { min-height: 16px; color: var(--sx-muted); font-size: 12px; }
 .sx-analysis-dialog { max-height: calc(100% - 32px); overflow: auto; }
-.sx-analysis-dialog [hidden] { display: none; }
+.sx-dialog [hidden] { display: none !important; }
 .sx-analysis-dialog select[multiple] { height: auto; min-height: 72px; padding: 4px; }
 .sx-analysis-dialog [role=alert] { color: #C00000; white-space: normal; }
 @media (max-width: 600px) {
