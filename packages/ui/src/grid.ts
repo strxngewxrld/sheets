@@ -505,7 +505,12 @@ export class GridRenderer {
       for (let c = c0; c <= c1; c++) {
         const x = vp.x(c);
         const w = vp.geo.cols.size(c);
-        if (w <= 0) continue;
+        if (w <= 0) {
+          // Mark the position of hidden columns.
+          ctx.fillStyle = t.muted;
+          ctx.fillRect(Math.round(x) - 2, 3, 3, vp.headerH - 6);
+          continue;
+        }
         const active = c >= sel.start.col && c <= sel.end.col;
         if (active) {
           ctx.fillStyle = t.headerActiveBg;
@@ -541,7 +546,14 @@ export class GridRenderer {
       for (let r = r0; r <= r1; r++) {
         const y = vp.y(r);
         const h = vp.geo.rows.size(r);
-        if (h <= 0) continue;
+        if (h <= 0) {
+          if (vp.sheet.rowHeights.get(r) === 0) {
+            // Mark manually hidden rows (filtered rows are shown by the filter button).
+            ctx.fillStyle = t.muted;
+            ctx.fillRect(3, Math.round(y) - 2, vp.headerW - 6, 3);
+          }
+          continue;
+        }
         const active = r >= sel.start.row && r <= sel.end.row;
         if (active) {
           ctx.fillStyle = t.headerActiveBg;

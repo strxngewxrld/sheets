@@ -114,6 +114,26 @@
         "command": "sheets.replace",
         "title": "%command.replace%",
         "category": "Sheets"
+      },
+      {
+        "command": "sheets.hideRows",
+        "title": "%command.hideRows%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.unhideRows",
+        "title": "%command.unhideRows%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.hideCols",
+        "title": "%command.hideCols%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.unhideCols",
+        "title": "%command.unhideCols%",
+        "category": "Sheets"
       }
     ],
     "menus": {
@@ -138,6 +158,22 @@
         },
         {
           "command": "sheets.replace",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.hideRows",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.unhideRows",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.hideCols",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.unhideCols",
           "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
         }
       ]
@@ -2006,6 +2042,30 @@
         "command": "sheets.replace",
         "key": "ctrl+h",
         "mac": "cmd+alt+f",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      },
+      {
+        "command": "sheets.hideRows",
+        "key": "ctrl+9",
+        "mac": "cmd+9",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      },
+      {
+        "command": "sheets.unhideRows",
+        "key": "ctrl+shift+9",
+        "mac": "cmd+shift+9",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      },
+      {
+        "command": "sheets.hideCols",
+        "key": "ctrl+0",
+        "mac": "cmd+0",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      },
+      {
+        "command": "sheets.unhideCols",
+        "key": "ctrl+shift+0",
+        "mac": "cmd+shift+0",
         "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
       }
     ]

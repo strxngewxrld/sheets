@@ -6,5 +6,9 @@
   "configuration.headlessWrites": "KI-Agents dürfen auch Tabellendateien ändern, die nicht im Editor geöffnet sind. Änderungen werden direkt gespeichert. Erfordert einen vertrauenswürdigen Arbeitsbereich.",
   "workspaceTrust.description": "Der Tabelleneditor ist im eingeschränkten Modus verfügbar. KI-Agents dürfen ungeöffnete Dateien nur in vertrauenswürdigen Arbeitsbereichen ändern.",
   "command.find": "Suchen",
-  "command.replace": "Suchen und Ersetzen"
+  "command.replace": "Suchen und Ersetzen",
+  "command.hideRows": "Zeilen ausblenden",
+  "command.unhideRows": "Zeilen einblenden",
+  "command.hideCols": "Spalten ausblenden",
+  "command.unhideCols": "Spalten einblenden"
 }

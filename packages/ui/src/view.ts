@@ -12,6 +12,9 @@ import {
   formatRange,
   formatValue,
   getDefaultLocale,
+  hasHidden,
+  hideCols,
+  hideRows,
   insertChartFromRange,
   insertCols,
   insertRows,
@@ -34,6 +37,8 @@ import {
   sortRange,
   tableAt,
   setTableFilter,
+  unhideCols,
+  unhideRows,
   unmergeCells,
   CHART_TYPES,
   LOCALE_DE,
@@ -93,7 +98,7 @@ export interface SelectionInfo {
 }
 
 /** Commands a host (e.g. VS Code keybindings) can trigger in the view. */
-export type ViewCommand = 'find' | 'replace';
+export type ViewCommand = 'find' | 'replace' | 'hideRows' | 'unhideRows' | 'hideCols' | 'unhideCols';
 
 export type ViewEvents = {
   selectionChange: SelectionInfo;
@@ -226,6 +231,10 @@ export class SpreadsheetView {
     switch (command) {
       case 'find': this.openFind(false); break;
       case 'replace': this.openFind(true); break;
+      case 'hideRows': case 'unhideRows': case 'hideCols': case 'unhideCols':
+        if (this.options.readOnly || this.editor.editing) return;
+        this.setHidden(command.endsWith('Rows') ? 'row' : 'col', command.startsWith('hide'));
+        break;
     }
   }
 
@@ -1038,6 +1047,26 @@ export class SpreadsheetView {
     });
   }
 
+  /** Hides or shows the selected rows/columns; hiding moves the cursor to a visible cell. */
+  private setHidden(axis: 'row' | 'col', hidden: boolean): void {
+    const sel = this.selectionRange();
+    const [first, last] = axis === 'row' ? [sel.start.row, sel.end.row] : [sel.start.col, sel.end.col];
+    this.mutate(() => {
+      if (axis === 'row') (hidden ? hideRows : unhideRows)(this.wb, this.sheet.name, first, last);
+      else (hidden ? hideCols : unhideCols)(this.wb, this.sheet.name, first, last);
+    });
+    if (!hidden) return;
+    this.geoDirty = true;
+    this.ensureGeometry();
+    const axisGeo = axis === 'row' ? this.vp.geo.rows : this.vp.geo.cols;
+    const max = axis === 'row' ? MAX_ROWS : MAX_COLS;
+    let target = last + 1;
+    while (target < max && axisGeo.size(target) === 0) target++;
+    if (target >= max) { target = first - 1; while (target > 0 && axisGeo.size(target) === 0) target--; }
+    const cell = axis === 'row' ? { row: Math.max(0, target), col: this.active.col } : { row: this.active.row, col: Math.max(0, target) };
+    this.setSelection(cell, cell);
+  }
+
   private toggleFreeze(): void {
     const sheet = this.sheet;
     this.mutate(() => {
@@ -1498,6 +1527,11 @@ export class SpreadsheetView {
       { label: s.insertColRight, disabled: ro, action: () => this.mutate(() => insertCols(this.wb, name, sel.end.col + 1, cols)) },
       { label: s.deleteCols, disabled: ro, action: () => this.mutate(() => deleteCols(this.wb, name, sel.start.col, cols)) },
       'separator',
+      { label: s.hideRows, disabled: ro, action: () => this.setHidden('row', true) },
+      { label: s.unhideRows, disabled: ro || !hasHidden(this.sheet, 'row', sel.start.row, sel.end.row), action: () => this.setHidden('row', false) },
+      { label: s.hideCols, disabled: ro, action: () => this.setHidden('col', true) },
+      { label: s.unhideCols, disabled: ro || !hasHidden(this.sheet, 'col', sel.start.col, sel.end.col), action: () => this.setHidden('col', false) },
+      'separator',
       { label: s.sortAsc, disabled: ro, action: () => this.sortSelection(false) },
       { label: s.sortDesc, disabled: ro, action: () => this.sortSelection(true) },
       { label: s.sort, disabled: ro, action: () => this.openSort() },
@@ -1632,6 +1666,12 @@ export class SpreadsheetView {
       // Ctrl+F finds; Ctrl+H (and Cmd+Option+F on macOS, as in VS Code) replaces.
       e.preventDefault();
       this.openFind(e.code === 'KeyH' || e.altKey);
+      return;
+    }
+    if (mod && !e.altKey && (e.code === 'Digit9' || e.code === 'Digit0')) {
+      // Ctrl+9 / Ctrl+0 hide rows / columns; with Shift they unhide.
+      e.preventDefault();
+      if (!this.options.readOnly) this.setHidden(e.code === 'Digit9' ? 'row' : 'col', !e.shiftKey);
       return;
     }
     if (mod && !e.altKey) {

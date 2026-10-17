@@ -6,5 +6,9 @@
   "configuration.headlessWrites": "Allow AI agent tools to modify spreadsheet files that are not open in an editor. Changes are saved to disk. Requires a trusted workspace.",
   "workspaceTrust.description": "The spreadsheet editor is available in Restricted Mode. AI agent tools can modify unopened files only in trusted workspaces.",
   "command.find": "Find",
-  "command.replace": "Find and Replace"
+  "command.replace": "Find and Replace",
+  "command.hideRows": "Hide Rows",
+  "command.unhideRows": "Unhide Rows",
+  "command.hideCols": "Hide Columns",
+  "command.unhideCols": "Unhide Columns"
 }
