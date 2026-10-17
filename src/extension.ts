@@ -3,6 +3,8 @@ import { openWorkbook, saveWorkbook, formatFromFileName, Workbook, writeXlsx } f
 import { SpreadsheetAgent, TOOL_DEFINITIONS, type ToolResult } from '@sheets/agent';
 import { SpreadsheetEditorProvider } from './provider.js';
 import { registerCopilotTools } from './copilot.js';
+import { decodeBytes } from './binary.js';
+import type { CsvExport } from './protocol.js';
 
 export interface SheetsApi {
   /** Tool definitions (name, description, JSON schema). */
@@ -49,6 +51,7 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
     ...(['find', 'replace', 'hideRows', 'unhideRows', 'hideCols', 'unhideCols', 'goTo', 'zoomIn', 'zoomOut', 'zoomReset'] as const).map((command) =>
       vscode.commands.registerCommand(`sheets.${command}`, () => provider.activeDocument?.post({ type: 'command', command })),
     ),
+    vscode.commands.registerCommand('sheets.exportCsv', () => exportCsv()),
     // Command interface for other extensions / automation:
     //   vscode.commands.executeCommand('sheets.executeTool', { name, input, file })
     vscode.commands.registerCommand('sheets.executeTool', (args: { name: string; input?: Record<string, unknown>; file?: string }) =>
@@ -62,6 +65,33 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
 }
 
 export function deactivate(): void {}
+
+/** Exports the active sheet of the active Sheets editor as CSV or TSV. */
+async function exportCsv(): Promise<void> {
+  const doc = provider.activeDocument;
+  const de = vscode.env.language.toLowerCase().startsWith('de');
+  if (!doc?.panel) {
+    void vscode.window.showInformationMessage(de ? 'Bitte zuerst eine Tabelle im Sheets-Editor öffnen.' : 'Open a spreadsheet in the Sheets editor first.');
+    return;
+  }
+  const choices = [
+    { label: de ? 'Semikolon (;)' : 'Semicolon (;)', delimiter: ';', ext: 'csv' },
+    { label: de ? 'Komma (,)' : 'Comma (,)', delimiter: ',', ext: 'csv' },
+    { label: de ? 'Tabulator' : 'Tab', delimiter: '\t', ext: 'tsv' },
+  ];
+  if (!de) choices.unshift(choices.splice(1, 1)[0]!);
+  const choice = await vscode.window.showQuickPick(choices, { placeHolder: de ? 'Trennzeichen für den Export' : 'Delimiter for the export' });
+  if (!choice) return;
+  const result = await doc.request<CsvExport>('exportCsv', { delimiter: choice.delimiter });
+  const base = doc.uri.path.split('/').pop()!.replace(/\.[^.]+$/, '');
+  const name = `${base}-${result.sheet}.${choice.ext}`.replace(/[\\/:*?"<>|]/g, '_');
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.joinPath(doc.uri, '..', name),
+    filters: choice.ext === 'tsv' ? { TSV: ['tsv'] } : { CSV: ['csv'] },
+  });
+  if (!target) return;
+  await vscode.workspace.fs.writeFile(target, decodeBytes(result.bytes));
+}
 
 function resolveUri(file: string | vscode.Uri | undefined): vscode.Uri | undefined {
   if (!file) return provider.activeDocument?.uri;

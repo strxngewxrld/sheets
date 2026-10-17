@@ -14,5 +14,6 @@
   "command.goTo": "Gehe zu Zelle…",
   "command.zoomIn": "Vergrößern",
   "command.zoomOut": "Verkleinern",
-  "command.zoomReset": "Zoom zurücksetzen"
+  "command.zoomReset": "Zoom zurücksetzen",
+  "command.exportCsv": "Blatt als CSV exportieren…"
 }

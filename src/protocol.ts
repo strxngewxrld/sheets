@@ -20,7 +20,15 @@ export type HostToWebview =
   | { type: 'redo' }
   | { type: 'command'; command: ViewCommand }
   | { type: 'request'; id: number; method: 'getFileData' | 'getBackupData' }
-  | { type: 'request'; id: number; method: 'executeTool'; params: { name: string; input: unknown } };
+  | { type: 'request'; id: number; method: 'executeTool'; params: { name: string; input: unknown } }
+  | { type: 'request'; id: number; method: 'exportCsv'; params: { delimiter: string } };
+
+/** Result of an exportCsv request: the active sheet as CSV. */
+export interface CsvExport {
+  sheet: string;
+  /** Base64 file bytes. */
+  bytes: string;
+}
 
 export type WebviewToHost =
   | { type: 'ready' }

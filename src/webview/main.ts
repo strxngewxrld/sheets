@@ -7,6 +7,7 @@ import {
   saveWorkbook,
   setDefaultLocale,
   Workbook,
+  writeCsv,
 } from '@sheets/core';
 import { SpreadsheetAgent } from '@sheets/agent';
 import { SpreadsheetView } from '@sheets/ui';
@@ -97,6 +98,10 @@ window.addEventListener('message', (event: MessageEvent<HostToWebview>) => {
             csv: { delimiter: csvDelimiter, locale: csvDelimiter === ';' ? LOCALE_DE : LOCALE_EN, lineEnding: '\n' },
           });
           post({ type: 'response', id: msg.id, result: encodeBytes(bytes) });
+        } else if (msg.method === 'exportCsv') {
+          const wb = view.workbook;
+          const bytes = new TextEncoder().encode(writeCsv(wb, wb.activeSheetIndex, { delimiter: msg.params.delimiter, locale: msg.params.delimiter === ';' ? LOCALE_DE : LOCALE_EN, lineEnding: '\r\n' }));
+          post({ type: 'response', id: msg.id, result: { sheet: wb.activeSheet.name, bytes: encodeBytes(bytes) } });
         } else if (msg.method === 'executeTool') {
           post({ type: 'response', id: msg.id, result: agent.execute(msg.params.name, msg.params.input) });
         }

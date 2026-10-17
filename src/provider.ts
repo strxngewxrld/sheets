@@ -29,7 +29,8 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
   /** Sends a request to the webview and waits for the response. */
   request<T>(method: 'getFileData' | 'getBackupData'): Promise<T>;
   request<T>(method: 'executeTool', params: { name: string; input: unknown }): Promise<T>;
-  request<T>(method: 'getFileData' | 'getBackupData' | 'executeTool', params?: { name: string; input: unknown }): Promise<T> {
+  request<T>(method: 'exportCsv', params: { delimiter: string }): Promise<T>;
+  request<T>(method: 'getFileData' | 'getBackupData' | 'executeTool' | 'exportCsv', params?: { name: string; input: unknown } | { delimiter: string }): Promise<T> {
     if (!this.panel) return Promise.reject(new Error('Spreadsheet editor is not open'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
@@ -38,7 +39,9 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
         if (this.pending.delete(id)) reject(new Error(`Webview request "${method}" timed out`));
       }, 60_000);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
-      const message: HostToWebview = method === 'executeTool' ? { type: 'request', id, method, params: params! } : { type: 'request', id, method };
+      const message: HostToWebview = method === 'executeTool' ? { type: 'request', id, method, params: params as { name: string; input: unknown } }
+        : method === 'exportCsv' ? { type: 'request', id, method, params: params as { delimiter: string } }
+          : { type: 'request', id, method };
       if (this.initialized) this.post(message);
       else this.queued.set(id, message);
     });

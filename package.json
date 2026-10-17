@@ -154,6 +154,12 @@
         "command": "sheets.zoomReset",
         "title": "%command.zoomReset%",
         "category": "Sheets"
+      },
+      {
+        "command": "sheets.exportCsv",
+        "title": "%command.exportCsv%",
+        "category": "Sheets",
+        "icon": "$(export)"
       }
     ],
     "menus": {
@@ -168,6 +174,11 @@
         {
           "command": "sheets.openWithSheets",
           "when": "resourceExtname =~ /\\.(csv|tsv|xlsx)$/ && activeCustomEditorId != sheets.spreadsheet && activeCustomEditorId != sheets.csv",
+          "group": "navigation"
+        },
+        {
+          "command": "sheets.exportCsv",
+          "when": "activeCustomEditorId == sheets.spreadsheet",
           "group": "navigation"
         }
       ],
@@ -210,6 +221,10 @@
         },
         {
           "command": "sheets.zoomReset",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.exportCsv",
           "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
         }
       ]
