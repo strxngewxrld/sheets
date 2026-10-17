@@ -101,6 +101,22 @@ const AGGREGATES: Record<number, (xs: number[], all: Scalar[]) => number> = {
   11: (xs) => variance(xs, false),
 };
 
+/**
+ * Replaces range arguments by their values without hidden rows. Rows hidden
+ * by a filter are always skipped; manually hidden rows only if `manual`.
+ */
+function withoutHiddenRows(args: EvalValue[], ctx: FunctionContext, manual: boolean): EvalValue[] {
+  if (!ctx.rowHidden) return args;
+  return args.map((a) => {
+    if (!isRef(a)) return a;
+    const m = toMatrix(a, ctx);
+    return m.filter((_, i) => {
+      const why = ctx.rowHidden!(a.sheet, a.range.start.row + i);
+      return !(why === 'filtered' || (why === 'manual' && manual));
+    });
+  });
+}
+
 export const mathFunctions: FunctionDef[] = [
   def('SUM', 'math', 'SUM(number1, [number2], ...)', 'Adds all numbers.', (args, ctx) => sum(numbersOf(args, ctx)), { minArgs: 1 }),
   def('PRODUCT', 'math', 'PRODUCT(number1, [number2], ...)', 'Multiplies all numbers.', (args, ctx) => numbersOf(args, ctx).reduce((a, b) => a * b, 1), { minArgs: 1 }),
@@ -244,12 +260,13 @@ export const mathFunctions: FunctionDef[] = [
     }
     return total;
   }, { minArgs: 1 }),
-  def('SUBTOTAL', 'math', 'SUBTOTAL(function_num, ref1, ...)', 'Aggregate (1=AVERAGE, 9=SUM, ...; 101-111 ignore hidden).', ([fnum, ...refs], ctx) => {
-    const code = Math.trunc(numArg(fnum, ctx)) % 100;
-    const agg = AGGREGATES[code];
-    if (!agg) return Err.VALUE;
-    return agg(numbersOf(refs, ctx), [...scalarsOf(refs, ctx)]);
-  }, { minArgs: 2 }),
+  def('SUBTOTAL', 'math', 'SUBTOTAL(function_num, ref1, ...)', 'Aggregate of visible rows (1=AVERAGE, 9=SUM, ...; 101-111 also skip manually hidden rows).', ([fnum, ...refs], ctx) => {
+    const raw = Math.trunc(numArg(fnum, ctx));
+    const agg = AGGREGATES[raw % 100];
+    if (!agg || (raw > 11 && raw < 101) || raw > 111) return Err.VALUE;
+    const visible = withoutHiddenRows(refs, ctx, raw > 100);
+    return agg(numbersOf(visible, ctx), [...scalarsOf(visible, ctx)]);
+  }, { minArgs: 2, volatile: true }),
 
   def('AGGREGATE', 'math', 'AGGREGATE(function_num, options, ref1, [ref2 | k])', 'Aggregate that can ignore errors (options 2, 3, 6, 7); 1=AVERAGE ... 19=QUARTILE.EXC.', ([fnum, opt, ...refs], ctx) => {
     const code = Math.trunc(numArg(fnum, ctx));
@@ -258,7 +275,7 @@ export const mathFunctions: FunctionDef[] = [
     const skipErrors = (options & 2) !== 0;
     const withK = code >= 14;
     if (withK && refs.length !== 2) return Err.VALUE;
-    const data = withK ? refs.slice(0, 1) : refs;
+    const data = (options & 1) ? withoutHiddenRows(withK ? refs.slice(0, 1) : refs, ctx, true) : withK ? refs.slice(0, 1) : refs;
     const xs: number[] = [];
     const all: Scalar[] = [];
     for (const v of scalarsOf(data, ctx)) {
@@ -282,7 +299,7 @@ export const mathFunctions: FunctionDef[] = [
       case 18: return percentileExc(xs, k);
       default: return Number.isInteger(k) && k >= 1 && k <= 3 ? percentileExc(xs, k / 4) : Err.NUM;
     }
-  }, { minArgs: 3 }),
+  }, { minArgs: 3, volatile: true }),
 
   // Statistics
   def('MEDIAN', 'statistical', 'MEDIAN(number1, [number2], ...)', 'Median.', (args, ctx) => median(numbersOf(args, ctx)), { minArgs: 1 }),

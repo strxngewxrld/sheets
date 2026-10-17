@@ -30,6 +30,8 @@ export interface EvalContext {
   /** Parses a reference string (for INDIRECT). */
   parseRef?(ref: string): Node | undefined;
   getSpillRange?(sheet: string, row: number, col: number): RangeAddress | CellError;
+  /** Why a row is hidden: by a table filter, manually (height 0), or not at all. */
+  rowHidden?(sheet: string, row: number): 'filtered' | 'manual' | false;
   /** Names bound by LET or LAMBDA parameters (upper-case keys). */
   readonly locals?: ReadonlyMap<string, EvalValue>;
 }

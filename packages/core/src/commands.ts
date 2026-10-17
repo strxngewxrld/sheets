@@ -470,6 +470,36 @@ export function setRowHeight(wb: Workbook, sheet: string | number, rows: number[
   wb.apply({ type: 'setRowHeights', sheet: sheetName(wb, sheet), sizes: rows.map((index) => ({ index, size: height })) }, options);
 }
 
+/** Hides rows (a hidden row has height 0, as in the XLSX model). */
+export function hideRows(wb: Workbook, sheet: string | number, first: number, last = first, options: ApplyOptions = {}): void {
+  const indices = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  wb.apply({ type: 'setRowHeights', sheet: sheetName(wb, sheet), sizes: indices.map((index) => ({ index, size: 0 })) }, options);
+}
+
+/** Shows hidden rows in the range again at the default height. */
+export function unhideRows(wb: Workbook, sheet: string | number, first: number, last = first, options: ApplyOptions = {}): void {
+  const s = wb.requireSheet(sheet);
+  const sizes = [...s.rowHeights].filter(([i, h]) => h === 0 && i >= first && i <= last).map(([index]) => ({ index, size: null }));
+  if (sizes.length) wb.apply({ type: 'setRowHeights', sheet: s.name, sizes }, options);
+}
+
+export function hideCols(wb: Workbook, sheet: string | number, first: number, last = first, options: ApplyOptions = {}): void {
+  const indices = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  wb.apply({ type: 'setColWidths', sheet: sheetName(wb, sheet), sizes: indices.map((index) => ({ index, size: 0 })) }, options);
+}
+
+export function unhideCols(wb: Workbook, sheet: string | number, first: number, last = first, options: ApplyOptions = {}): void {
+  const s = wb.requireSheet(sheet);
+  const sizes = [...s.colWidths].filter(([i, w]) => w === 0 && i >= first && i <= last).map(([index]) => ({ index, size: null }));
+  if (sizes.length) wb.apply({ type: 'setColWidths', sheet: s.name, sizes }, options);
+}
+
+/** True if any row (or column) in the range is hidden manually. */
+export function hasHidden(sheet: Sheet, axis: 'row' | 'col', first: number, last: number): boolean {
+  for (const [i, size] of axis === 'row' ? sheet.rowHeights : sheet.colWidths) if (size === 0 && i >= first && i <= last) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Charts
 // ---------------------------------------------------------------------------

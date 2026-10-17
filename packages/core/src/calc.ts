@@ -5,6 +5,7 @@ import { parseFormula, walk } from './formula/parser.js';
 import { getFunction } from './formula/registry.js';
 import { boundNames } from './formula/scope.js';
 import type { Sheet } from './sheet.js';
+import { tableFilteredRows } from './table.js';
 import { CellError, Err, type Scalar } from './values.js';
 import type { Workbook } from './workbook.js';
 
@@ -343,7 +344,16 @@ export class CalcEngine {
 
   contextFor(sheet: Sheet, row: number, col: number): EvalContext & { hasFormula(s: string, r: number, c: number): boolean } {
     const wb = this.wb;
+    const filtered = new Map<Sheet, Set<number>>();
     return {
+      rowHidden: (name, r) => {
+        const s = wb.getSheet(name);
+        if (!s) return false;
+        if (s.rowHeights.get(r) === 0) return 'manual';
+        let rows = filtered.get(s);
+        if (!rows) filtered.set(s, (rows = tableFilteredRows(s)));
+        return rows.has(r) ? 'filtered' : false;
+      },
       sheet: sheet.name,
       row,
       col,
