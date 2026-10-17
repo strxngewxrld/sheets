@@ -519,6 +519,8 @@ export interface FindOptions {
   regex?: boolean;
   /** Search formulas instead of displayed values. */
   inFormulas?: boolean;
+  /** Restrict to a range of the searched sheet(s). */
+  range?: RangeAddress;
   limit?: number;
 }
 
@@ -532,10 +534,19 @@ export interface FindResult {
   formula?: string;
 }
 
-export function findCells(wb: Workbook, query: string, opts: FindOptions = {}): FindResult[] {
-  const flags = opts.caseSensitive ? '' : 'i';
+function searchPattern(query: string, opts: FindOptions, global = false): RegExp {
+  const flags = (opts.caseSensitive ? '' : 'i') + (global ? 'g' : '');
   const source = opts.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(opts.wholeCell ? `^(?:${source})$` : source, flags);
+  return new RegExp(opts.wholeCell ? `^(?:${source})$` : source, flags);
+}
+
+function inSearchRange(opts: FindOptions, row: number, col: number): boolean {
+  const r = opts.range;
+  return !r || (row >= r.start.row && row <= r.end.row && col >= r.start.col && col <= r.end.col);
+}
+
+export function findCells(wb: Workbook, query: string, opts: FindOptions = {}): FindResult[] {
+  const re = searchPattern(query, opts);
   const out: FindResult[] = [];
   const limit = opts.limit ?? 1000;
   for (const sheet of wb.sheets) {
@@ -543,6 +554,10 @@ export function findCells(wb: Workbook, query: string, opts: FindOptions = {}): 
     const keys = [...sheet.cells.keys()].sort((a, b) => a - b);
     for (const key of keys) {
       const cell = sheet.cells.get(key)!;
+      if (opts.range) {
+        const { row, col } = keyToAddress(key);
+        if (!inSearchRange(opts, row, col)) continue;
+      }
       const display = formatValue(cell.value, cell.style?.numFmt);
       const haystack = opts.inFormulas ? (cell.formula !== undefined ? `=${cell.formula}` : display) : display;
       if (!re.test(haystack)) continue;
@@ -554,6 +569,52 @@ export function findCells(wb: Workbook, query: string, opts: FindOptions = {}): 
     }
   }
   return out;
+}
+
+export interface ReplaceOptions extends Omit<FindOptions, 'limit'> {
+  /** Replace only in these cells (e.g. the current match); defaults to all matches. */
+  cells?: { sheet: string; row: number; col: number }[];
+}
+
+/** Editable content of a constant cell, as it would be typed. */
+function constantText(v: Scalar): string | null {
+  if (v === null || isError(v)) return null;
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  return String(v);
+}
+
+/**
+ * Replaces matches like Excel's Replace dialog: formulas are changed in their
+ * text (only when searching formulas), constants in their typed content.
+ * Returns the number of changed cells; all changes form one undo step.
+ */
+export function replaceCells(wb: Workbook, query: string, replacement: string, opts: ReplaceOptions = {}, options: ApplyOptions = {}): number {
+  if (query === '') return 0;
+  const re = searchPattern(query, opts, true);
+  const only = opts.cells && new Set(opts.cells.map((c) => `${c.sheet.toUpperCase()}!${c.row}:${c.col}`));
+  const patches = new Map<string, CellPatch[]>();
+  let count = 0;
+  for (const sheet of wb.sheets) {
+    if (opts.sheet && sheet.name.toUpperCase() !== opts.sheet.toUpperCase()) continue;
+    for (const [key, cell] of sheet.cells) {
+      if (cell.spillParent !== undefined) continue;
+      const { row, col } = keyToAddress(key);
+      if (!inSearchRange(opts, row, col) || (only && !only.has(`${sheet.name.toUpperCase()}!${row}:${col}`))) continue;
+      const content = cell.formula !== undefined ? (opts.inFormulas ? `=${cell.formula}` : null) : constantText(cell.value);
+      if (content === null) continue;
+      re.lastIndex = 0;
+      if (!re.test(content)) continue;
+      re.lastIndex = 0;
+      const next = content.replace(re, opts.regex ? replacement : replacement.replace(/\$/g, '$$$$'));
+      if (next === content) continue;
+      const list = patches.get(sheet.name) ?? [];
+      list.push({ row, col, data: inputToCellData(next, cell.style) });
+      patches.set(sheet.name, list);
+      count++;
+    }
+  }
+  if (count) wb.apply([...patches].map(([sheet, cells]) => ({ type: 'setCells' as const, sheet, cells })), options);
+  return count;
 }
 
 export type { Operation };
