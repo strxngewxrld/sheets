@@ -8,6 +8,7 @@ import { isError } from '../values.js';
 import { Workbook } from '../workbook.js';
 import { tableAt, tableCellStyle, tableColumnNames, tableFilteredRows, type TableTheme } from '../table.js';
 import { toArgb } from './colors.js';
+import { defaultIconThresholds, type Threshold } from '../conditional.js';
 import { encodeOoxmlEscapes, escapeXml } from './xml.js';
 import { preserveXlsx } from './xlsx-preserve.js';
 import { validationsXml } from './xlsx-validations.js';
@@ -284,6 +285,12 @@ function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isA
     let content: string;
     if (rule.type === 'colorScale') {
       content = `<cfRule ${attrs}><colorScale><cfvo type="min"/>${rule.colors.length === 3 ? '<cfvo type="percent" val="50"/>' : ''}<cfvo type="max"/>${rule.colors.map((c) => `<color rgb="${toArgb(c)}"/>`).join('')}</colorScale></cfRule>`;
+    } else if (rule.type === 'dataBar') {
+      const cfvo = (t: Threshold) => `<cfvo type="${t.type}"${t.value !== undefined ? ` val="${t.value}"` : ''}/>`;
+      content = `<cfRule ${attrs}><dataBar${rule.showValue === false ? ' showValue="0"' : ''}>${cfvo(rule.min ?? { type: 'min' })}${cfvo(rule.max ?? { type: 'max' })}<color rgb="${toArgb(rule.color)}"/></dataBar></cfRule>`;
+    } else if (rule.type === 'iconSet') {
+      const cfvo = (t: Threshold) => `<cfvo type="${t.type}"${t.value !== undefined ? ` val="${t.value}"` : ''}/>`;
+      content = `<cfRule ${attrs}><iconSet iconSet="${rule.iconSet}"${rule.reverse ? ' reverse="1"' : ''}${rule.showValue === false ? ' showValue="0"' : ''}>${(rule.thresholds ?? defaultIconThresholds(rule.iconSet)).map(cfvo).join('')}</iconSet></cfRule>`;
     } else {
       content = `<cfRule ${attrs} dxfId="${styles.differential(rule.style)}"${rule.type === 'cellIs' ? ` operator="${rule.operator}"` : ''}>${rule.formulas.map((f) => `<formula>${escapeXml(addFutureFunctionPrefixes(f.replace(/^=/, '')))}</formula>`).join('')}</cfRule>`;
     }

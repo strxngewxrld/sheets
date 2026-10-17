@@ -12,7 +12,7 @@ import { Workbook } from '../workbook.js';
 import { registerBuiltinFunctions } from '../formula/functions/index.js';
 import { parseFormula } from '../formula/parser.js';
 import { hasUnknownFunctions } from '../formula/scope.js';
-import { CONDITIONAL_OPERATORS, type ConditionalFormatRule, type ConditionalOperator } from '../conditional.js';
+import { CONDITIONAL_OPERATORS, defaultIconThresholds, iconCount, ICON_SETS, type ConditionalFormatRule, type ConditionalOperator, type IconSetName, type Threshold } from '../conditional.js';
 import { TABLE_THEMES, type TableTheme } from '../table.js';
 import { readValidations } from './xlsx-validations.js';
 import { applyTint, DEFAULT_THEME, INDEXED_COLORS } from './colors.js';
@@ -356,6 +356,18 @@ function readDrawingCharts(pkg: Package, drawingPath: string): ChartSpec[] {
 // Worksheets
 // ---------------------------------------------------------------------------
 
+function readThreshold(node: XNode): Threshold | null {
+  const type = attr(node, 'type');
+  if (type === 'min' || type === 'max') return { type };
+  const value = Number(attr(node, 'val'));
+  if ((type === 'num' || type === 'percent' || type === 'percentile') && Number.isFinite(value)) return { type, value };
+  return null;
+}
+
+function canonicalThresholds(ts: Threshold[]): string {
+  return JSON.stringify(ts.map((t) => [t.type, t.value ?? null]));
+}
+
 function readSheet(pkg: Package, path: string, name: string, sharedStrings: string[], styles: StyleReader): SheetData {
   const doc = pkg.xml(path);
   const ws = doc?.worksheet ?? {};
@@ -481,6 +493,21 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
           const supported = attr(limits[0], 'type') === 'min' && attr(limits.at(-1), 'type') === 'max' &&
             (limits.length === 2 || (limits.length === 3 && attr(limits[1], 'type') === 'percent' && numAttr(limits[1], 'val') === 50));
           if (supported && [2, 3].includes(colors.length) && colors.every((c): c is string => !!c)) rule = { ...base, type, colors };
+        }
+        if (type === 'dataBar') {
+          const limits = arr(node.dataBar?.cfvo).map(readThreshold);
+          const color = styles.color(arr(node.dataBar?.color)[0]);
+          if (limits.length === 2 && limits.every((t): t is Threshold => !!t) && color) {
+            rule = { ...base, type, color, ...(limits[0]!.type !== 'min' ? { min: limits[0]! } : {}), ...(limits[1]!.type !== 'max' ? { max: limits[1]! } : {}), ...(attr(node.dataBar, 'showValue') === '0' ? { showValue: false } : {}) };
+          }
+        }
+        if (type === 'iconSet') {
+          const iconSet = (attr(node.iconSet, 'iconSet') ?? '3TrafficLights1') as IconSetName;
+          const thresholds = arr(node.iconSet?.cfvo).map(readThreshold);
+          if (ICON_SETS.includes(iconSet) && thresholds.length === iconCount(iconSet) && thresholds.every((t): t is Threshold => !!t)) {
+            const defaults = canonicalThresholds(thresholds) === canonicalThresholds(defaultIconThresholds(iconSet));
+            rule = { ...base, type, iconSet, ...(defaults ? {} : { thresholds }), ...(attr(node.iconSet, 'reverse') === '1' ? { reverse: true } : {}), ...(attr(node.iconSet, 'showValue') === '0' ? { showValue: false } : {}) };
+          }
         }
         if (rule) conditional.push({ priority, rule });
       }

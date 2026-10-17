@@ -89,3 +89,48 @@ describe('conditional formatting', () => {
     expect(wb.getCellStyle(0, 0, 0)).toBeUndefined();
   });
 });
+
+describe('data bars and icon sets', () => {
+  it('computes bar lengths and icons from range statistics', async () => {
+    const { ConditionalFormatEvaluator, setConditionalFormats, setValues, Workbook } = await import('../src/index.js');
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [[0], [25], [50], [100], ['x']]);
+    setConditionalFormats(wb, 0, [
+      { id: 'bar', range: 'A1:A5', type: 'dataBar', color: '#638EC6' },
+      { id: 'icons', range: 'A1:A5', type: 'iconSet', iconSet: '3Arrows' },
+      { id: 'fixed', range: 'B1:B2', type: 'dataBar', color: '#FF0000', min: { type: 'num', value: 0 }, max: { type: 'num', value: 10 }, showValue: false },
+    ]);
+    setValues(wb, 0, 0, 1, [[5], [20]]);
+    const ev = new ConditionalFormatEvaluator(wb);
+    const sheet = wb.activeSheet;
+    expect([0, 1, 2, 3].map((r) => ev.visual(sheet, r, 0)?.bar?.fraction)).toEqual([0, 0.25, 0.5, 1]);
+    expect([0, 1, 2, 3].map((r) => ev.visual(sheet, r, 0)?.icon?.index)).toEqual([0, 0, 1, 2]);
+    expect(ev.visual(sheet, 4, 0)).toBeUndefined();
+    expect(ev.visual(sheet, 0, 1)).toEqual({ bar: { fraction: 0.5, color: '#FF0000' }, hideValue: true });
+    expect(ev.visual(sheet, 1, 1)?.bar?.fraction).toBe(1);
+    expect(ev.style(sheet, 1, 0)).toBeUndefined();
+    setConditionalFormats(wb, 0, [{ id: 'r', range: 'A1:A4', type: 'iconSet', iconSet: '4Rating', reverse: true, thresholds: [{ type: 'num', value: 0 }, { type: 'percentile', value: 25 }, { type: 'percentile', value: 50 }, { type: 'max' }] }]);
+    const ev2 = new ConditionalFormatEvaluator(wb);
+    expect([0, 1, 2, 3].map((r) => ev2.visual(sheet, r, 0)?.icon?.index)).toEqual([3, 2, 1, 0]);
+    expect(() => setConditionalFormats(wb, 0, [{ id: 'bad', range: 'A1', type: 'iconSet', iconSet: '3Arrows', thresholds: [{ type: 'min' }] }])).toThrow(/needs 3 thresholds/);
+  });
+
+  it('roundtrips through XLSX and reads Excel data bars', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { strFromU8, unzipSync } = await import('fflate');
+    const { readXlsx, setConditionalFormats, Workbook, writeXlsx } = await import('../src/index.js');
+    const wb = new Workbook();
+    const rules = [
+      { id: 'a', range: 'A1:A9', type: 'dataBar' as const, color: '#63BE7B', min: { type: 'num' as const, value: 0 }, showValue: false },
+      { id: 'b', range: 'B1:B9', type: 'iconSet' as const, iconSet: '5Quarters' as const, reverse: true },
+    ];
+    setConditionalFormats(wb, 0, rules);
+    const bytes = writeXlsx(wb);
+    const xml = strFromU8(unzipSync(bytes)['xl/worksheets/sheet1.xml']!);
+    expect(xml).toContain('<dataBar showValue="0"><cfvo type="num" val="0"/><cfvo type="max"/><color rgb="FF63BE7B"/></dataBar>');
+    expect(xml).toContain('<iconSet iconSet="5Quarters" reverse="1"><cfvo type="percent" val="0"/><cfvo type="percent" val="20"/>');
+    expect(readXlsx(bytes).activeSheet.conditionalFormats.map(({ id: _id, ...r }) => r)).toEqual(rules.map(({ id: _id, ...r }) => ({ ...r, stopIfTrue: false })));
+    const fixture = readXlsx(readFileSync(new URL('./fixtures/excel-features.xlsx', import.meta.url)));
+    expect(fixture.activeSheet.conditionalFormats).toMatchObject([{ range: 'B2:B20', type: 'dataBar', color: '#638EC6', min: { type: 'num', value: 0 }, max: { type: 'num', value: 100 } }]);
+  });
+});

@@ -1,7 +1,7 @@
 import { cellKey, formatRange, keyToAddress, parseRange, MAX_COLS, MAX_ROWS, type RangeAddress } from './address.js';
 import { CalcEngine, gid } from './calc.js';
 import type { ChartSpec } from './chart.js';
-import { ConditionalFormatEvaluator, validateConditionalFormats } from './conditional.js';
+import { ConditionalFormatEvaluator, hasFormulas, validateConditionalFormats } from './conditional.js';
 import { Emitter } from './events.js';
 import { registerBuiltinFunctions } from './formula/functions/index.js';
 import {
@@ -418,7 +418,7 @@ export class Workbook {
       }
       for (const chart of sheet.charts) rewriteChartRefs(chart, (ref) => fn(ref, sheet.name));
       for (const rule of sheet.conditionalFormats) {
-        if (rule.type !== 'colorScale') rule.formulas = rule.formulas.map((f) => fn(f, sheet.name));
+        if (hasFormulas(rule)) rule.formulas = rule.formulas.map((f) => fn(f, sheet.name));
       }
       for (const rule of sheet.validations) {
         if (rule.formula1 !== undefined && !/^".*"$/s.test(rule.formula1)) rule.formula1 = fn(rule.formula1, sheet.name);
@@ -461,7 +461,7 @@ export class Workbook {
       const range = parseRange(rule.range)!.range;
       const key = isRow ? 'row' : 'col';
       const offset = count < 0 && range.start[key] >= index && range.start[key] < index - count ? index - count - range.start[key] : 0;
-      return [{ ...rule, range: ref, ...(rule.type !== 'colorScale' && offset ? { formulas: rule.formulas.map((f) => shiftFormula(f, isRow ? offset : 0, isRow ? 0 : offset)) } : {}) }];
+      return [{ ...rule, range: ref, ...(hasFormulas(rule) && offset ? { formulas: rule.formulas.map((f) => shiftFormula(f, isRow ? offset : 0, isRow ? 0 : offset)) } : {}) }];
     });
     sheet.validations = sheet.validations.flatMap((rule) => {
       const before = validationRanges(rule);
