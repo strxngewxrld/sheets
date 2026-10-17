@@ -18,6 +18,7 @@ export type Node =
   | { type: 'func'; name: string; args: Node[] }
   | { type: 'unary'; op: '-' | '+'; arg: Node }
   | { type: 'percent'; arg: Node }
+  | { type: 'spill'; arg: Node }
   | { type: 'binary'; op: BinaryOp; left: Node; right: Node }
   | { type: 'array'; rows: Node[][] }
   | { type: 'missing' };

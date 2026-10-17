@@ -1,11 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/agent" },
-    { "path": "packages/ui" },
-    { "path": "packages/mcp" },
-    { "path": "apps/web" },
-    { "path": "apps/vscode" }
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/agent"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "packages/mcp"
+    },
+    {
+      "path": "apps/web"
+    },
+    {
+      "path": "tsconfig.extension.json"
+    }
   ]
 }

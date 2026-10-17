@@ -62,4 +62,67 @@ describe('SpreadsheetAgent', () => {
     const tools = toAnthropicTools(new SpreadsheetAgent(new Workbook()).tools);
     expect(tools.find((t) => t.name === 'write_range')?.input_schema).toBeTruthy();
   });
+
+  it('discovers and uses financial functions through tools', () => {
+    const wb = new Workbook();
+    const agent = new SpreadsheetAgent(wb);
+    const result = agent.execute('list_functions', { category: 'financial' });
+    expect(result.ok).toBe(true);
+    const functions = (result.result as { functions: { name: string }[] }).functions;
+    expect(functions.map((f) => f.name)).toEqual(['FV', 'IPMT', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV']);
+    const schema = agent.tools.find((tool) => tool.name === 'list_functions')!.inputSchema;
+    expect(JSON.stringify(schema)).toContain('financial');
+    expect(agent.execute('write_range', { start: 'A1', values: [['=PMT(0,12,1200)']] }).ok).toBe(true);
+    expect(wb.getValue(0, 0, 0)).toBe(-100);
+    expect(agent.execute('undo', {}).ok).toBe(true);
+    expect(wb.getValue(0, 0, 0)).toBe(null);
+  });
+
+  it('handles spilled arrays and conditional formatting through the same tools as the UI', () => {
+    const wb = new Workbook();
+    const agent = new SpreadsheetAgent(wb);
+    expect(agent.execute('write_range', { start: 'A1', values: [['=SEQUENCE(3)']] }).ok).toBe(true);
+    expect(agent.execute('read_range', { range: 'A1:A3' }).result).toMatchObject({ values: [[1], [2], [3]] });
+    expect(agent.execute('write_range', { start: 'A2', values: [[42]] }).ok).toBe(false);
+    const rules = [{ id: 'high', range: 'A1:A3', type: 'cellIs', operator: 'greaterThan', formulas: ['1'], style: { numFmt: '0.00', fill: '#FF0000' } }];
+    expect(agent.execute('set_conditional_formats', { rules }).ok).toBe(true);
+    expect(agent.execute('read_range', { range: 'A1:A3', format: 'display' }).result).toMatchObject({ values: [['1'], ['2.00'], ['3.00']] });
+    expect(agent.execute('list_conditional_formats', {}).result).toEqual({ sheet: 'Sheet1', rules });
+    expect(agent.execute('undo', {}).ok).toBe(true);
+    expect(wb.activeSheet.conditionalFormats).toHaveLength(0);
+  });
+
+  it('creates, refreshes, lists and removes pivot reports with undo', () => {
+    const wb = new Workbook();
+    const agent = new SpreadsheetAgent(wb);
+    agent.execute('write_range', { start: 'A1', values: [['Team', 'Sales'], ['A', 10], ['A', 20], ['B', 30]] });
+    expect(agent.execute('create_pivot_table', { id: 'sales', source_range: 'A1:B4', target_cell: 'D1', rows: ['Team'], values: [{ field: 'Sales', aggregate: 'sum' }] }).ok).toBe(true);
+    expect(wb.getValue(0, 3, 4)).toBe(60);
+    expect(agent.execute('list_pivot_tables', {}).result).toMatchObject({ tables: [{ id: 'sales' }] });
+    agent.execute('write_range', { start: 'B2', values: [[100]] });
+    expect(agent.execute('refresh_pivot_table', { id: 'sales' }).ok).toBe(true);
+    expect(wb.getValue(0, 3, 4)).toBe(150);
+    agent.execute('undo', {});
+    expect(wb.getValue(0, 3, 4)).toBe(60);
+    expect(agent.execute('remove_pivot_table', { id: 'sales' }).ok).toBe(true);
+    expect(wb.getValue(0, 3, 4)).toBe(null);
+    agent.execute('undo', {});
+    expect(wb.getValue(0, 3, 4)).toBe(60);
+  });
+
+  it('formats, discovers and removes tables without changing the data', () => {
+    const wb = new Workbook();
+    const agent = new SpreadsheetAgent(wb);
+    agent.execute('write_range', { start: 'A1', values: [['Name', 'Value'], ['B', 20], ['A', 10]] });
+    expect(agent.execute('format_table', { range: 'A1:B3', name: 'Sales', theme: 'green' }).ok).toBe(true);
+    expect(agent.execute('list_tables', {}).result).toMatchObject({ tables: [{ name: 'Sales', range: 'A1:B3' }] });
+    expect(wb.getCellStyle(0, 0, 0)?.fill).toBe('#548235');
+    agent.execute('sort_range', { range: 'A1:B3', by: [{ column: 'A' }], has_header: true });
+    expect(wb.getValue(0, 1, 0)).toBe('A');
+    expect(agent.execute('remove_table', { name: 'Sales' }).ok).toBe(true);
+    expect(wb.activeSheet.tables).toHaveLength(0);
+    expect(wb.getValue(0, 1, 1)).toBe(10);
+    agent.execute('undo', {});
+    expect(wb.activeSheet.tables).toHaveLength(1);
+  });
 });

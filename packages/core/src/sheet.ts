@@ -1,5 +1,7 @@
 import { cellKey, formatRange, keyToAddress, parseAddress, parseRange, formatAddress, type RangeAddress } from './address.js';
 import type { ChartSpec } from './chart.js';
+import type { ConditionalFormatRule } from './conditional.js';
+import type { SheetTable } from './table.js';
 import type { CellStyle } from './style.js';
 import { scalarFromJson, scalarToJson, type JsonScalar, type Scalar } from './values.js';
 
@@ -11,6 +13,10 @@ export interface Cell {
   style?: CellStyle;
   /** Value came from a file cache and must be kept if the formula cannot be evaluated. */
   cached?: boolean;
+  /** Derived array cell: key of its formula anchor. Never stored as user input. */
+  spillParent?: number;
+  /** Current output rectangle of an array formula. */
+  spillRange?: RangeAddress;
 }
 
 /** Serializable cell content. */
@@ -18,6 +24,8 @@ export interface CellData {
   v?: JsonScalar;
   f?: string;
   s?: CellStyle;
+  /** Cached array extent (primarily used by XLSX import). */
+  a?: string;
 }
 
 export interface SheetData {
@@ -29,6 +37,8 @@ export interface SheetData {
   merges?: string[];
   frozen?: { rows: number; cols: number };
   charts?: ChartSpec[];
+  conditionalFormats?: ConditionalFormatRule[];
+  tables?: SheetTable[];
   defaultColWidth?: number;
   defaultRowHeight?: number;
 }
@@ -47,6 +57,8 @@ export class Sheet {
   merges: RangeAddress[] = [];
   frozen = { rows: 0, cols: 0 };
   charts: ChartSpec[] = [];
+  conditionalFormats: ConditionalFormatRule[] = [];
+  tables: SheetTable[] = [];
   defaultColWidth = DEFAULT_COL_WIDTH;
   defaultRowHeight = DEFAULT_ROW_HEIGHT;
   private usedCache: RangeAddress | null | undefined;
@@ -85,6 +97,12 @@ export class Sheet {
       if (row > maxR) maxR = row;
       if (col < minC) minC = col;
       if (col > maxC) maxC = col;
+    }
+    for (const table of this.tables) {
+      const range = parseRange(table.range)?.range;
+      if (!range) continue;
+      minR = Math.min(minR, range.start.row); minC = Math.min(minC, range.start.col);
+      maxR = Math.max(maxR, range.end.row); maxC = Math.max(maxC, range.end.col);
     }
     this.usedCache = maxR < 0 ? null : { start: { row: minR, col: minC }, end: { row: maxR, col: maxC } };
     return this.usedCache;
@@ -127,7 +145,9 @@ export class Sheet {
     const cells: Record<string, CellData> = {};
     for (const [key, cell] of this.cells) {
       const { row, col } = keyToAddress(key);
-      cells[formatAddress(row, col)] = Sheet.cellToData(cell)!;
+      if (cell.spillParent !== undefined) {
+        if (cell.style) cells[formatAddress(row, col)] = { s: cell.style };
+      } else cells[formatAddress(row, col)] = Sheet.cellToData(cell)!;
     }
     const data: SheetData = { name: this.name, cells };
     if (this.colWidths.size) data.colWidths = Object.fromEntries(this.colWidths);
@@ -135,6 +155,8 @@ export class Sheet {
     if (this.merges.length) data.merges = this.merges.map((m) => formatRange(m));
     if (this.frozen.rows || this.frozen.cols) data.frozen = { ...this.frozen };
     if (this.charts.length) data.charts = structuredClone(this.charts);
+    if (this.conditionalFormats.length) data.conditionalFormats = structuredClone(this.conditionalFormats);
+    if (this.tables.length) data.tables = structuredClone(this.tables);
     if (this.defaultColWidth !== DEFAULT_COL_WIDTH) data.defaultColWidth = this.defaultColWidth;
     if (this.defaultRowHeight !== DEFAULT_ROW_HEIGHT) data.defaultRowHeight = this.defaultRowHeight;
     return data;
@@ -146,11 +168,25 @@ export class Sheet {
       const a = parseAddress(addr);
       if (a) sheet.cells.set(cellKey(a.row, a.col), Sheet.dataToCell(cd));
     }
+    for (const [addr, cd] of Object.entries(data.cells ?? {})) {
+      if (!cd.a) continue;
+      const anchor = parseAddress(addr);
+      const range = parseRange(cd.a)?.range;
+      if (!anchor || !range || !sheet.getCell(anchor.row, anchor.col)?.formula) continue;
+      const parent = cellKey(anchor.row, anchor.col);
+      sheet.cells.get(parent)!.spillRange = range;
+      for (const [key, cell] of sheet.cells) {
+        const p = keyToAddress(key);
+        if (key !== parent && !cell.formula && p.row >= range.start.row && p.row <= range.end.row && p.col >= range.start.col && p.col <= range.end.col) cell.spillParent = parent;
+      }
+    }
     for (const [k, v] of Object.entries(data.colWidths ?? {})) sheet.colWidths.set(Number(k), v);
     for (const [k, v] of Object.entries(data.rowHeights ?? {})) sheet.rowHeights.set(Number(k), v);
     sheet.merges = (data.merges ?? []).map((m) => parseRange(m)?.range).filter((r): r is RangeAddress => !!r);
     if (data.frozen) sheet.frozen = { ...data.frozen };
     sheet.charts = structuredClone(data.charts ?? []);
+    sheet.conditionalFormats = structuredClone(data.conditionalFormats ?? []);
+    sheet.tables = structuredClone(data.tables ?? []);
     if (data.defaultColWidth) sheet.defaultColWidth = data.defaultColWidth;
     if (data.defaultRowHeight) sheet.defaultRowHeight = data.defaultRowHeight;
     return sheet;

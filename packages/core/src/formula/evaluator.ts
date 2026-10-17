@@ -29,6 +29,7 @@ export interface EvalContext {
   resolveName(name: string): Node | undefined;
   /** Parses a reference string (for INDIRECT). */
   parseRef?(ref: string): Node | undefined;
+  getSpillRange?(sheet: string, row: number, col: number): RangeAddress | CellError;
 }
 
 export interface FunctionContext extends EvalContext {
@@ -249,6 +250,12 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
         const n = toNumber(s);
         return isError(n) ? n : n / 100;
       });
+    }
+    case 'spill': {
+      const ref = evaluate(node.arg, ctx);
+      if (!isRef(ref) || ref.range.start.row !== ref.range.end.row || ref.range.start.col !== ref.range.end.col) return Err.REF;
+      const range = ctx.getSpillRange?.(ref.sheet, ref.range.start.row, ref.range.start.col);
+      return !range ? Err.REF : isError(range) ? range : { kind: 'ref', sheet: ref.sheet, range };
     }
     case 'binary': {
       const left = evaluate(node.left, ctx);

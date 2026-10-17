@@ -81,7 +81,7 @@ export function tokenize(src: string): Token[] {
     }
     if (ch === '#') {
       const m = ERROR_RE.exec(rest);
-      push(m ? 'error' : 'unknown', m ? m[0].length : 1);
+      push(m ? 'error' : 'op', m ? m[0].length : 1);
       continue;
     }
     // References (must be tried before numbers for row ranges like 1:3 and before identifiers).

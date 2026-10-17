@@ -3,6 +3,7 @@ import {
   applyStyle,
   clearRange,
   copyRange,
+  ConditionalFormatEvaluator,
   deleteCols,
   deleteRows,
   Emitter,
@@ -26,9 +27,13 @@ import {
   parseRange,
   pasteRange,
   rangeToTSV,
+  refreshPivotTable,
+  removePivotTable,
   setCellInput,
   setValues,
   sortRange,
+  tableAt,
+  setTableFilter,
   unmergeCells,
   CHART_TYPES,
   LOCALE_DE,
@@ -42,6 +47,9 @@ import {
   type Workbook,
 } from '@sheets/core';
 import { ChartLayer } from './chart-layer.js';
+import { closeAnalysisDialog, openCellFormatDialog, openConditionalDialog, openPivotDialog, openSortDialog, openTableFormatDialog, openTableFilterDialog } from './analysis-dialogs.js';
+import { currentRegion, resolveSortContext } from './sheet-actions.js';
+export { currentRegion } from './sheet-actions.js';
 import type { ChartTheme } from './charts.js';
 import { CellEditor, formulaHighlights } from './editor.js';
 import { Geometry } from './geometry.js';
@@ -119,6 +127,7 @@ export class SpreadsheetView {
   private tabsEl?: HTMLDivElement;
   private statusEl?: HTMLDivElement;
   private toolbarEl?: HTMLDivElement;
+  private tableControls!: HTMLDivElement;
   private controls: Record<string, HTMLElement> = {};
 
   private vp = new Viewport();
@@ -184,6 +193,7 @@ export class SpreadsheetView {
 
   /** Replaces the displayed workbook (e.g. after opening a file). */
   setWorkbook(wb: Workbook): void {
+    closeAnalysisDialog(this.root);
     this.wbOff?.();
     this.wb = wb;
     this.bindWorkbook();
@@ -195,6 +205,7 @@ export class SpreadsheetView {
   }
 
   activateSheet(nameOrIndex: string | number): void {
+    closeAnalysisDialog(this.root);
     const sheet = this.wb.getSheet(nameOrIndex);
     if (!sheet) return;
     if (this.editor.editing) this.commitEdit();
@@ -406,12 +417,14 @@ export class SpreadsheetView {
     for (const [code, label] of formats) fmt.add(new Option(label, code));
     fmt.add(new Option('…', '__custom', false, false));
     fmt.addEventListener('change', () => {
-      if (fmt.value === '__custom') return;
+      if (fmt.value === '__custom') { this.openCellFormats(); return; }
       this.styleSelection({ numFmt: fmt.value || null });
       this.focus();
     });
     tb.appendChild(fmt);
     this.controls.numFmt = fmt;
+    button('formatCells', s.formatCells, s.formatCells, () => this.openCellFormats());
+    button('formatTable', s.formatTable, s.formatTable, () => this.openTableFormats());
 
     const size = document.createElement('select');
     size.className = 'sx-select';
@@ -487,6 +500,7 @@ export class SpreadsheetView {
     sep();
     button('sortAsc', s.sortAsc, ICONS.sortAsc, () => this.sortSelection(false), true);
     button('sortDesc', s.sortDesc, ICONS.sortDesc, () => this.sortSelection(true), true);
+    button('sort', s.sort, s.sort, () => this.openSort());
     button('freeze', s.freeze, ICONS.freeze, () => this.toggleFreeze(), true);
     sep();
     const chartBtn = button('chart', s.chart, `${ICONS.chart}<span>${escapeHtml(s.chartEditor)}</span>`, (b) => {
@@ -494,6 +508,29 @@ export class SpreadsheetView {
       showMenu(this.root, r.left, r.bottom + 2, CHART_TYPES.map((t) => ({ label: s[t], action: () => this.insertChart(t) })));
     }, true);
     chartBtn.setAttribute('aria-haspopup', 'menu');
+    button('conditionalFormatting', s.conditionalFormatting, s.conditionalFormatting, () => {
+      if (this.options.readOnly) return;
+      this.charts.closeEditor();
+      openConditionalDialog(this.root, this.wb, this.sheet.name, this.selectionRange(), s, () => this.focus());
+    });
+    const pivotButton = button('pivot', s.pivot, s.pivot, (b) => {
+      if (this.options.readOnly) return;
+      const rect = b.getBoundingClientRect();
+      const entries: MenuEntry[] = [{ label: s.createPivot, action: () => {
+        let range = this.selectionRange();
+        if (range.start.row === range.end.row && range.start.col === range.end.col) range = currentRegion(this.sheet, this.active);
+        this.charts.closeEditor();
+        openPivotDialog(this.root, this.wb, this.sheet.name, range, s, () => this.focus());
+      } }];
+      if (this.wb.pivotTables.length) {
+        entries.push({ label: s.refreshPivots, action: () => this.mutate(() => this.wb.transaction(() => {
+          for (const pivot of [...this.wb.pivotTables]) refreshPivotTable(this.wb, pivot.id);
+        })) });
+        for (const pivot of this.wb.pivotTables) entries.push({ label: `${s.delete}: ${pivot.source.sheet}!${pivot.source.range} → ${pivot.target.cell}`, action: () => this.mutate(() => removePivotTable(this.wb, pivot.id)) });
+      }
+      showMenu(this.root, rect.left, rect.bottom + 2, entries);
+    });
+    pivotButton.setAttribute('aria-haspopup', 'menu');
     return tb;
   }
 
@@ -587,7 +624,21 @@ export class SpreadsheetView {
     vp.scrollY = this.scroller.scrollTop;
 
     const highlights = this.editor.editing ? formulaHighlights(this.editor.value, sheet.name) : [];
+    if (!this.editor.editing) {
+      const selected = sheet.getCell(this.active.row, this.active.col);
+      const parent = selected?.spillParent !== undefined ? keyToAddress(selected.spillParent) : this.active;
+      const spill = sheet.getCell(parent.row, parent.col)?.spillRange;
+      if (spill) highlights.push({ range: spill, color: this.theme.accent });
+    }
+    const conditional = new ConditionalFormatEvaluator(this.wb);
+    const resolvedStyles = new Map<number, ReturnType<ConditionalFormatEvaluator['style']>>();
+    const cellStyle = (row: number, col: number) => {
+      const key = row * MAX_COLS + col;
+      if (!resolvedStyles.has(key)) resolvedStyles.set(key, conditional.style(sheet, row, col));
+      return resolvedStyles.get(key);
+    };
     this.renderer.draw(vp, {
+      cellStyle,
       selection: normalizeRange(this.anchor, this.focusCell),
       active: this.active,
       highlights,
@@ -596,6 +647,7 @@ export class SpreadsheetView {
       locale: this.locale,
       showFillHandle: !this.editor.editing && !this.options.readOnly,
     });
+    this.renderTableControls();
 
     // Editor follows its cell (or the active cell as an invisible focus sink).
     const ec = this.editor.editing ? this.editor.cell : this.active;
@@ -623,7 +675,7 @@ export class SpreadsheetView {
     if (this.formulaInput && !(this.editor.editing && this.editor.activeInput === this.formulaInput)) {
       this.formulaInput.value = this.editor.editing ? this.editor.value : this.editText(this.active.row, this.active.col);
     }
-    const style = cell?.style;
+    const style = this.wb.getCellStyle(sheet.name, this.active.row, this.active.col);
     const pressed = (id: string, on: boolean) => this.controls[id]?.setAttribute('aria-pressed', String(on));
     pressed('bold', !!style?.bold);
     pressed('italic', !!style?.italic);
@@ -795,8 +847,21 @@ export class SpreadsheetView {
   }
 
   private move(dr: number, dc: number, extend: boolean): void {
+    this.ensureGeometry();
+    const visibleTarget = (cell: CellAddress): CellAddress => {
+      const next = clampCell(cell);
+      if (dr) {
+        const step = Math.sign(dr);
+        while (this.vp.geo.rows.size(next.row) === 0 && next.row + step >= 0 && next.row + step < MAX_ROWS) next.row += step;
+      }
+      if (dc) {
+        const step = Math.sign(dc);
+        while (this.vp.geo.cols.size(next.col) === 0 && next.col + step >= 0 && next.col + step < MAX_COLS) next.col += step;
+      }
+      return next;
+    };
     if (extend) {
-      const f = clampCell({ row: this.focusCell.row + dr, col: this.focusCell.col + dc });
+      const f = visibleTarget({ row: this.focusCell.row + dr, col: this.focusCell.col + dc });
       this.setSelection(this.anchor, f, this.active);
       this.scrollIntoView(f.row, f.col);
       return;
@@ -809,7 +874,7 @@ export class SpreadsheetView {
       if (dr < 0) row = merge.start.row;
       if (dc < 0) col = merge.start.col;
     }
-    let next = clampCell({ row: row + dr, col: col + dc });
+    let next = visibleTarget({ row: row + dr, col: col + dc });
     const target = this.sheet.mergeAt(next.row, next.col);
     if (target) next = { ...target.start };
     this.setSelection(next, next);
@@ -918,8 +983,8 @@ export class SpreadsheetView {
   }
 
   private toggleStyle(key: 'bold' | 'italic' | 'underline' | 'strike' | 'wrap'): void {
-    const current = this.sheet.getCell(this.active.row, this.active.col)?.style?.[key];
-    this.styleSelection({ [key]: current ? null : true } as StylePatch);
+    const current = this.wb.getCellStyle(this.sheet.name, this.active.row, this.active.col)?.[key];
+    this.styleSelection({ [key]: !current } as StylePatch);
   }
 
   private toggleMerge(): void {
@@ -945,12 +1010,79 @@ export class SpreadsheetView {
   }
 
   private sortSelection(descending: boolean): void {
+    this.commitEdit();
+    const { range, hasHeader } = resolveSortContext(this.sheet, this.selectionRange(), this.active);
+    this.mutate(() => sortRange(this.wb, this.sheet.name, range, [{ col: this.active.col, descending }], { hasHeader }));
+  }
+
+  private openCellFormats(): void {
+    if (this.options.readOnly) return;
+    this.commitEdit(); this.charts.closeEditor();
+    openCellFormatDialog(this.root, this.wb, this.sheet.name, this.selectionRange(), this.locale, this.strings, () => this.focus(), (range) => this.autoFit(range.start.col, range.end.col));
+  }
+
+  private openTableFormats(): void {
+    if (this.options.readOnly) return;
+    this.commitEdit(); this.charts.closeEditor();
     let range = this.selectionRange();
-    const sheet = this.sheet;
-    // A single cell sorts the surrounding data block (current region).
-    if (range.start.row === range.end.row && range.start.col === range.end.col) range = currentRegion(sheet, this.active);
-    const header = range.end.row > range.start.row && typeof sheet.getValue(range.start.row, this.active.col) === 'string' && typeof sheet.getValue(range.start.row + 1, this.active.col) !== 'string';
-    this.mutate(() => sortRange(this.wb, sheet.name, range, [{ col: this.active.col, descending }], { hasHeader: header }));
+    const table = tableAt(this.sheet, this.active.row, this.active.col);
+    if (table) range = parseRange(table.range)!.range;
+    else if (range.start.row === range.end.row && range.start.col === range.end.col) range = currentRegion(this.sheet, this.active);
+    openTableFormatDialog(this.root, this.wb, this.sheet.name, range, this.strings, () => this.focus(), (range) => this.autoFit(range.start.col, range.end.col));
+  }
+
+  private openSort(): void {
+    if (this.options.readOnly) return;
+    this.commitEdit(); this.charts.closeEditor();
+    const { range, hasHeader } = resolveSortContext(this.sheet, this.selectionRange(), this.active);
+    openSortDialog(this.root, this.wb, this.sheet.name, range, hasHeader, this.active.col, this.strings, () => this.focus());
+  }
+
+  private renderTableControls(): void {
+    if (!this.tableControls) {
+      this.tableControls = document.createElement('div'); this.tableControls.className = 'sx-table-controls';
+      this.gridEl.append(this.tableControls);
+    }
+    this.tableControls.replaceChildren();
+    if (this.editor.editing || this.options.readOnly) return;
+    const vp = this.vp;
+    for (const table of this.sheet.tables) {
+      if (!table.headerRow) continue;
+      const range = parseRange(table.range)!.range;
+      const row = range.start.row;
+      const y = vp.y(row), height = vp.geo.rows.size(row);
+      const minimumY = vp.headerH + (row >= vp.frozenRows ? vp.frozenH : 0);
+      if (height < 14 || y < minimumY || y >= vp.height - 16) continue;
+      for (let col = range.start.col; col <= range.end.col; col++) {
+        const x = vp.x(col), width = vp.geo.cols.size(col);
+        const minimumX = vp.headerW + (col >= vp.frozenCols ? vp.frozenW : 0);
+        if (width < 22 || x + width - 18 < minimumX || x + width > vp.width - 14) continue;
+        const filtered = table.filters?.some((f) => f.column === col - range.start.col);
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'sx-table-sort'; b.textContent = filtered ? '⏷' : '▾';
+        b.classList.toggle('sx-filter-active', !!filtered);
+        b.style.background = filtered ? this.theme.selection : '';
+        const title = this.strings.filterColumn.replace('{0}', String(this.sheet.getValue(row, col) ?? formatAddress(row, col)));
+        b.title = title; b.setAttribute('aria-label', title); b.setAttribute('aria-haspopup', 'menu');
+        b.style.left = `${x + width - 18}px`; b.style.top = `${y + Math.max(0, (height - 18) / 2)}px`;
+        b.style.color = this.wb.getCellStyle(this.sheet.name, row, col)?.color ?? this.theme.fg;
+        b.addEventListener('mousedown', (event) => { event.preventDefault(); event.stopPropagation(); });
+        b.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.setSelection(range.start, range.end, { row, col });
+          const rect = b.getBoundingClientRect();
+          showMenu(this.root, rect.left, rect.bottom + 2, [
+            { label: this.strings.ascending, action: () => this.mutate(() => sortRange(this.wb, this.sheet.name, range, [{ col }], { hasHeader: true })) },
+            { label: this.strings.descending, action: () => this.mutate(() => sortRange(this.wb, this.sheet.name, range, [{ col, descending: true }], { hasHeader: true })) },
+            { label: this.strings.sort, action: () => this.openSort() },
+            'separator',
+            { label: this.strings.filterValues, action: () => openTableFilterDialog(this.root, this.wb, this.sheet.name, table, col, this.locale, this.strings, () => this.focus()) },
+            { label: this.strings.clearFilter, disabled: !filtered, action: () => setTableFilter(this.wb, this.sheet.name, table.name, col - range.start.col, null) },
+            { label: this.strings.formatCells, action: () => { this.select({ start: { row: Math.min(row + 1, range.end.row), col }, end: { row: range.end.row, col } }); this.openCellFormats(); } },
+          ]);
+        });
+        this.tableControls.append(b);
+      }
+    }
   }
 
   private insertChart(type: (typeof CHART_TYPES)[number]): void {
@@ -962,15 +1094,20 @@ export class SpreadsheetView {
     });
   }
 
-  private autoFit(col: number): void {
+  private autoFit(firstCol: number, lastCol = firstCol): void {
     const sheet = this.sheet;
-    let width = 0;
+    const widths = new Map<number, number>();
+    const conditional = new ConditionalFormatEvaluator(this.wb);
     for (const [key, cell] of sheet.cells) {
       const a = keyToAddress(key);
-      if (a.col !== col || cell.value === null) continue;
-      width = Math.max(width, this.renderer.measure(formatValue(cell.value, cell.style?.numFmt, this.locale), cell.style));
+      if (a.col < firstCol || a.col > lastCol || cell.value === null) continue;
+      const style = conditional.style(sheet, a.row, a.col);
+      const table = tableAt(sheet, a.row, a.col);
+      const header = table?.headerRow && parseRange(table.range)!.range.start.row === a.row;
+      const width = this.renderer.measure(formatValue(cell.value, style?.numFmt, this.locale), style) + 12 + (header ? 18 : 0);
+      widths.set(a.col, Math.max(widths.get(a.col) ?? 0, width));
     }
-    if (width) this.mutate(() => this.wb.apply({ type: 'setColWidths', sheet: sheet.name, sizes: [{ index: col, size: Math.ceil(width + 12) }] }));
+    if (widths.size) this.mutate(() => this.wb.apply({ type: 'setColWidths', sheet: sheet.name, sizes: [...widths].map(([index, width]) => ({ index, size: Math.ceil(width) })) }));
   }
 
   // =========================================================================
@@ -1321,6 +1458,9 @@ export class SpreadsheetView {
       'separator',
       { label: s.sortAsc, disabled: ro, action: () => this.sortSelection(false) },
       { label: s.sortDesc, disabled: ro, action: () => this.sortSelection(true) },
+      { label: s.sort, disabled: ro, action: () => this.openSort() },
+      { label: s.formatCells, disabled: ro, action: () => this.openCellFormats() },
+      { label: s.formatTable, disabled: ro, action: () => this.openTableFormats() },
       { label: s.chart, disabled: ro, action: () => this.insertChart('column') },
       'separator',
       { label: s.clearContents, disabled: ro, action: () => this.mutate(() => clearRange(this.wb, name, sel, 'contents')) },
@@ -1447,6 +1587,7 @@ export class SpreadsheetView {
     // ---- Not editing: navigation and shortcuts ----
     if (mod && !e.altKey) {
       const k = e.key.toLowerCase();
+      if (k === '1') { e.preventDefault(); this.openCellFormats(); return; }
       if ((k === 'z' && !e.shiftKey) || k === 'y' || (k === 'z' && e.shiftKey)) {
         if (!this.options.keyboardUndo) return;
         e.preventDefault();
@@ -1626,27 +1767,4 @@ function escapeHtml(s: string): string {
 
 function normalizeNewlines(s: string): string {
   return s.replace(/\r\n/g, '\n').replace(/\n$/, '');
-}
-
-/** The contiguous non-empty block around a cell (Excel's "current region"). */
-export function currentRegion(sheet: Sheet, cell: CellAddress): RangeAddress {
-  const r = { start: { ...cell }, end: { ...cell } };
-  const filledRow = (row: number, c0: number, c1: number) => {
-    for (let c = c0; c <= c1; c++) if (sheet.getValue(row, c) !== null) return true;
-    return false;
-  };
-  const filledCol = (col: number, r0: number, r1: number) => {
-    for (let x = r0; x <= r1; x++) if (sheet.getValue(x, col) !== null) return true;
-    return false;
-  };
-  let changed = true;
-  while (changed) {
-    changed = false;
-    if (r.start.row > 0 && filledRow(r.start.row - 1, Math.max(0, r.start.col - 1), r.end.col + 1)) { r.start.row--; changed = true; }
-    if (filledRow(r.end.row + 1, Math.max(0, r.start.col - 1), r.end.col + 1)) { r.end.row++; changed = true; }
-    if (r.start.col > 0 && filledCol(r.start.col - 1, Math.max(0, r.start.row - 1), r.end.row + 1)) { r.start.col--; changed = true; }
-    if (filledCol(r.end.col + 1, Math.max(0, r.start.row - 1), r.end.row + 1)) { r.end.col++; changed = true; }
-    if (r.end.row - r.start.row > 100_000 || r.end.col - r.start.col > 1000) break;
-  }
-  return r;
 }

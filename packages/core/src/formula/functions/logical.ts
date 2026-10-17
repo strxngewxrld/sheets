@@ -43,7 +43,17 @@ function is(name: string, description: string, pred: (v: Scalar) => boolean): Fu
 
 export const logicalFunctions: FunctionDef[] = [
   lazy('IF', 'IF(condition, value_if_true, [value_if_false])', 'Returns one value if a condition is true and another if false.', ([c, t, f], ctx) => {
-    const cond = condition(c!, ctx);
+    const test = deref(ctx.evaluate(c!), ctx);
+    if (Array.isArray(test)) {
+      const flags = test.map((row) => row.map(toBoolean));
+      const yes = flags.some((row) => row.some((v) => v === true)) ? deref(evalArg(t, ctx, true), ctx) : null;
+      const no = flags.some((row) => row.some((v) => v === false)) ? deref(evalArg(f, ctx, false), ctx) : null;
+      return broadcast([test, yes, no], (v, y, n) => {
+        const flag = toBoolean(v);
+        return isError(flag) ? flag : flag ? y : n;
+      });
+    }
+    const cond = toBoolean(test);
     if (isError(cond)) return cond;
     return cond ? evalArg(t, ctx, true) : evalArg(f, ctx, false);
   }, { minArgs: 2, maxArgs: 3 }),

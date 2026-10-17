@@ -3,23 +3,33 @@ import {
   applyStyle,
   CHART_TYPES,
   clearRange,
+  CONDITIONAL_OPERATORS,
+  ConditionalFormatEvaluator,
+  createPivotTable,
   colToName,
   copyRange,
   findCells,
   formatAddress,
   formatRange,
   formatValue,
+  formatTable,
   insertChartFromRange,
   isError,
+  keyToAddress,
   listFunctions,
   mergeCells,
   nameToCol,
   parseFormula,
   parseRange,
   pasteRange,
+  PIVOT_AGGREGATES,
+  refreshPivotTable,
+  removePivotTable,
   removeChart,
+  removeTable,
   resolveChart,
   setValues,
+  setConditionalFormats,
   shiftFormula,
   sortRange,
   unmergeCells,
@@ -28,13 +38,16 @@ import {
   chartFromRange,
   MAX_COLS,
   MAX_ROWS,
+  TABLE_THEMES,
   type CellPatch,
+  type ConditionalFormatRule,
   type ChartSpec,
   type ChartType,
   type ClearMode,
   type InputValue,
   type LegendPosition,
   type RangeAddress,
+  type PivotTableSpec,
   type Scalar,
   type Sheet,
   type StylePatch,
@@ -220,9 +233,12 @@ export const TOOLS: ToolImpl[] = [
           charts: s.charts.map((c) => ({ id: c.id, type: c.type, title: c.title ?? null })),
           frozen: s.frozen,
           merges: s.merges.map((m) => formatRange(m)),
+          conditionalFormats: s.conditionalFormats.length,
+          tables: s.tables.map((t) => ({ name: t.name, range: t.range, headerRow: t.headerRow, bandedRows: t.bandedRows })),
         };
       }),
       names: Object.fromEntries([...wb.names.values()].map((n) => [n.name, n.ref])),
+      pivotTables: structuredClone(wb.pivotTables),
       canUndo: wb.canUndo,
       canRedo: wb.canRedo,
     }),
@@ -257,13 +273,14 @@ export const TOOLS: ToolImpl[] = [
       const format = optStr(input, 'format') ?? 'values';
       const values: unknown[][] = [];
       const formulas: Record<string, string> = {};
+      const conditional = new ConditionalFormatEvaluator(ctx.wb);
       for (let r = range.start.row; r <= lastRow; r++) {
         const line: unknown[] = [];
         for (let c = range.start.col; c <= range.end.col; c++) {
           const cell = sheet.getCell(r, c);
           if (cell?.formula !== undefined && input.include_formulas !== false) formulas[formatAddress(r, c)] = `=${cell.formula}`;
           if (format === 'values') line.push(jsonValue(cell?.value ?? null));
-          else line.push(cell ? formatValue(cell.value, cell.style?.numFmt) : '');
+          else line.push(formatValue(cell?.value ?? null, conditional.style(sheet, r, c)?.numFmt));
         }
         values.push(line);
       }
@@ -294,7 +311,7 @@ export const TOOLS: ToolImpl[] = [
           description: 'Rows of cell values, e.g. [["Name","Total"],["A",1],["Sum","=SUM(B2:B2)"]]',
           items: { type: 'array', items: { type: ['string', 'number', 'boolean', 'null'] } },
         },
-        parse: { type: 'boolean', description: 'Parse strings like typed input (default true). Set false to store text literally.', default: true },
+        parse: { type: 'boolean', description: 'Parse strings like typed input (default true). Set false to preserve non-formula strings literally, especially identifiers with leading zeroes and Business Central Code fields. Strings starting with "=" are still formulas.', default: true },
       },
       required: ['start', 'values'],
     },
@@ -393,6 +410,111 @@ export const TOOLS: ToolImpl[] = [
       });
       return { formatted: formatRange(range, sheet.name) };
     },
+  },
+  {
+    name: 'format_table',
+    description: 'Formats a data range as a table with a header and alternating row colors. Table styles stay attached to row positions when sorting. A single undo step; saved as a native XLSX table. Existing direct cell formats take priority.',
+    inputSchema: { type: 'object', properties: {
+      sheet: SHEET_PARAM, range: { type: 'string' }, name: { type: 'string' },
+      theme: { type: 'string', enum: Object.keys(TABLE_THEMES), default: 'blue' },
+      header_row: { type: 'boolean', default: true }, banded_rows: { type: 'boolean', default: true },
+    }, required: ['range'] },
+    run: (ctx, input) => {
+      const text = str(input, 'range'); const sheet = sheetOf(ctx, input, text);
+      const theme = optStr(input, 'theme');
+      if (theme && !TABLE_THEMES[theme]) throw new ToolInputError('Unknown table theme');
+      return formatTable(ctx.wb, sheet.name, clip(sheet, rangeOf(text)), { name: optStr(input, 'name'), headerRow: input.header_row !== false, bandedRows: input.banded_rows !== false, theme: theme ? TABLE_THEMES[theme] : undefined });
+    },
+  },
+  {
+    name: 'list_tables', description: 'Lists the named tables and their ranges, header flags, stripe settings and styles.', readOnly: true,
+    inputSchema: { type: 'object', properties: { sheet: SHEET_PARAM } },
+    run: (ctx, input) => ({ sheet: sheetOf(ctx, input).name, tables: structuredClone(sheetOf(ctx, input).tables) }),
+  },
+  {
+    name: 'remove_table', description: 'Removes a table and its highlighting, keeping its data and direct cell formats. Supports undo.',
+    inputSchema: { type: 'object', properties: { sheet: SHEET_PARAM, name: { type: 'string' } }, required: ['name'] },
+    run: (ctx, input) => { removeTable(ctx.wb, sheetOf(ctx, input).name, str(input, 'name')); return { removed: true }; },
+  },
+  {
+    name: 'set_conditional_formats',
+    description: 'Replaces all conditional formatting rules on a sheet. Earlier rules take priority. Supports cellIs comparisons, expression formulas relative to the range top-left, and two/three-color scales. Pass [] to remove all rules.',
+    inputSchema: {
+      type: 'object', properties: {
+        sheet: SHEET_PARAM,
+        rules: { type: 'array', items: { type: 'object', properties: {
+          id: { type: 'string' }, range: { type: 'string' },
+          type: { type: 'string', enum: ['cellIs', 'expression', 'colorScale'] },
+          operator: { type: 'string', enum: CONDITIONAL_OPERATORS },
+          formulas: { type: 'array', items: { type: 'string' } },
+          style: STYLE_SCHEMA, colors: { type: 'array', items: { type: 'string' } },
+          stopIfTrue: { type: 'boolean' },
+        }, required: ['id', 'range', 'type'] } },
+      }, required: ['rules'],
+    },
+    run: (ctx, input) => {
+      if (!Array.isArray(input.rules)) throw new ToolInputError('rules must be an array');
+      const sheet = sheetOf(ctx, input);
+      setConditionalFormats(ctx.wb, sheet.name, input.rules as ConditionalFormatRule[]);
+      return { sheet: sheet.name, rules: structuredClone(sheet.conditionalFormats) };
+    },
+  },
+  {
+    name: 'list_conditional_formats',
+    description: 'Lists conditional formatting rules in priority order.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { sheet: SHEET_PARAM } },
+    run: (ctx, input) => {
+      const sheet = sheetOf(ctx, input);
+      return { sheet: sheet.name, rules: structuredClone(sheet.conditionalFormats) };
+    },
+  },
+  {
+    name: 'create_pivot_table',
+    description: 'Creates or refreshes a pivot report with header-based fields, row/column groups, filters and aggregates. The source must include a header row. Unrelated target cells are protected. Refresh explicitly after source edits. XLSX stores results as ordinary cells and keeps the Sheets definition, without a native Excel pivot cache.',
+    inputSchema: {
+      type: 'object', properties: {
+        id: { type: 'string', description: 'Unique pivot ID; reuse to refresh the same report.' },
+        source_sheet: SHEET_PARAM, source_range: { type: 'string' },
+        target_sheet: SHEET_PARAM, target_cell: { type: 'string' },
+        rows: { type: 'array', items: { type: ['string', 'integer'] } },
+        columns: { type: 'array', items: { type: ['string', 'integer'] } },
+        values: { type: 'array', items: { type: 'object', properties: {
+          field: { type: ['string', 'integer'] }, aggregate: { type: 'string', enum: PIVOT_AGGREGATES }, label: { type: 'string' },
+        }, required: ['field', 'aggregate'] } },
+        filters: { type: 'array', items: { type: 'object', properties: { field: { type: ['string', 'integer'] }, criteria: { type: ['string', 'number', 'boolean', 'null'] } }, required: ['field', 'criteria'] } },
+        grand_total_row: { type: 'boolean' }, grand_total_column: { type: 'boolean' },
+      }, required: ['id', 'source_range', 'target_cell', 'rows', 'values'],
+    },
+    run: (ctx, input) => {
+      const sourceText = str(input, 'source_range');
+      const source = sheetOf(ctx, { sheet: input.source_sheet }, sourceText);
+      const targetText = str(input, 'target_cell');
+      const target = sheetOf(ctx, { sheet: input.target_sheet }, targetText);
+      const spec: PivotTableSpec = {
+        id: str(input, 'id'), source: { sheet: source.name, range: formatRange(rangeOf(sourceText)) },
+        target: { sheet: target.name, cell: formatAddress(cellOf(targetText).row, cellOf(targetText).col) },
+        rows: input.rows as PivotTableSpec['rows'], columns: input.columns as PivotTableSpec['columns'],
+        values: input.values as PivotTableSpec['values'], filters: input.filters as PivotTableSpec['filters'],
+        grandTotalRow: input.grand_total_row !== false, grandTotalColumn: input.grand_total_column !== false,
+      };
+      return createPivotTable(ctx.wb, spec);
+    },
+  },
+  {
+    name: 'refresh_pivot_table', description: 'Rebuilds a pivot report from the current source values as one undoable change.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    run: (ctx, input) => refreshPivotTable(ctx.wb, str(input, 'id')),
+  },
+  {
+    name: 'list_pivot_tables', description: 'Lists pivot definitions, source/target ranges and last output rectangles.', readOnly: true,
+    inputSchema: { type: 'object', properties: {} },
+    run: (ctx) => ({ tables: structuredClone(ctx.wb.pivotTables) }),
+  },
+  {
+    name: 'remove_pivot_table', description: 'Removes a pivot definition and its output, preserving cell formatting. Supports undo.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    run: (ctx, input) => { removePivotTable(ctx.wb, str(input, 'id')); return { removed: true }; },
   },
   {
     name: 'insert_rows',
@@ -608,6 +730,7 @@ export const TOOLS: ToolImpl[] = [
       const sheet = sheetOf(ctx, input, text);
       const { row, col } = cellOf(text);
       const cell = sheet.getCell(row, col);
+      const effectiveStyle = ctx.wb.getCellStyle(sheet.name, row, col);
       const precedents: string[] = [];
       if (cell?.formula) {
         try {
@@ -627,9 +750,12 @@ export const TOOLS: ToolImpl[] = [
         cell: formatAddress(row, col),
         sheet: sheet.name,
         value: jsonValue(cell?.value ?? null),
-        display: cell ? formatValue(cell.value, cell.style?.numFmt) : '',
+        display: cell ? formatValue(cell.value, effectiveStyle?.numFmt) : '',
         formula: cell?.formula !== undefined ? `=${cell.formula}` : null,
         style: cell?.style ?? null,
+        effectiveStyle: effectiveStyle ?? null,
+        spillRange: cell?.spillRange ? formatRange(cell.spillRange) : null,
+        spillParent: cell?.spillParent !== undefined ? (() => { const p = keyToAddress(cell.spillParent); return formatAddress(p.row, p.col); })() : null,
         precedents,
         dependents,
       };
@@ -822,7 +948,7 @@ export const TOOLS: ToolImpl[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        category: { type: 'string', enum: ['math', 'statistical', 'logical', 'lookup', 'text', 'date', 'info'] },
+        category: { type: 'string', enum: ['math', 'statistical', 'financial', 'logical', 'lookup', 'text', 'date', 'info'] },
         search: { type: 'string' },
       },
     },

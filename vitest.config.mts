@@ -6,5 +6,5 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: { conditions: ['source', ...defaultClientConditions] },
   ssr: { resolve: { conditions: ['source', ...defaultServerConditions], externalConditions: ['source'] } },
-  test: { include: ['packages/*/test/**/*.test.ts'] },
+  test: { include: ['packages/*/test/**/*.test.ts', 'test/**/*.test.ts'] },
 });

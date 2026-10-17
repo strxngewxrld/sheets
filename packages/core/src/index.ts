@@ -9,6 +9,9 @@ export * from './sheet.js';
 export * from './ops.js';
 export * from './workbook.js';
 export * from './commands.js';
+export * from './conditional.js';
+export * from './pivot.js';
+export * from './table.js';
 export { CalcEngine } from './calc.js';
 
 export type { Node as FormulaNode, RefPoint } from './formula/ast.js';

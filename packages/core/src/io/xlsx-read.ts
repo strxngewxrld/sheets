@@ -9,8 +9,14 @@ import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, type CellData, type SheetData } 
 import type { BorderLineStyle, BorderSide, CellBorders, CellStyle, HAlign, VAlign } from '../style.js';
 import { errorFromCode, scalarToJson, type JsonScalar } from '../values.js';
 import { Workbook } from '../workbook.js';
+import { registerBuiltinFunctions } from '../formula/functions/index.js';
+import { parseFormula, walk } from '../formula/parser.js';
+import { getFunction } from '../formula/registry.js';
+import { CONDITIONAL_OPERATORS, type ConditionalFormatRule, type ConditionalOperator } from '../conditional.js';
+import { TABLE_THEMES, type TableTheme } from '../table.js';
 import { applyTint, DEFAULT_THEME, INDEXED_COLORS } from './colors.js';
 import { arr, attr, collectText, decodeOoxmlEscapes, flag, numAttr, parseXml, relsPathFor, resolvePath, text, type XNode } from './xml.js';
+import { encodeXlsxArchive } from './xlsx-preserve.js';
 
 export interface XlsxReadOptions {
   /** Recalculate all formulas after loading (default true). Values Excel cached are kept for unsupported functions. */
@@ -66,6 +72,8 @@ class Package {
 
 class StyleReader {
   styles: (CellStyle | undefined)[] = [];
+  differentials: CellStyle[] = [];
+  tableThemes = new Map<string, TableTheme>();
   private theme: string[];
 
   constructor(doc: XNode, theme: string[]) {
@@ -87,6 +95,9 @@ class StyleReader {
       for (const [k, v] of Object.entries(font) as [keyof CellStyle, never][]) {
         if (baseFont[k] !== v) (style as Record<string, unknown>)[k] = v;
       }
+      if (attr(xf, 'applyFont') === '1') {
+        for (const key of ['bold', 'italic', 'underline', 'strike'] as const) style[key] = font[key] ?? false;
+      }
       const fill = fills[numAttr(xf, 'fillId') ?? 0];
       const pf = fill?.patternFill;
       if (pf && attr(pf, 'patternType') && attr(pf, 'patternType') !== 'none') {
@@ -107,6 +118,38 @@ class StyleReader {
       }
       return Object.keys(style).length ? style : undefined;
     });
+    this.differentials = arr(ss.dxfs?.dxf).map((dxf) => {
+      const style: CellStyle = this.font(dxf.font);
+      for (const [key, tag] of [['bold', 'b'], ['italic', 'i'], ['underline', 'u'], ['strike', 'strike']] as const) {
+        if (dxf.font && tag in dxf.font) style[key] = key === 'underline' ? attr(dxf.font[tag], 'val') !== 'none' : flag(dxf.font, tag);
+      }
+      const color = this.color(dxf.font?.color);
+      if (color) style.color = color;
+      const fill = this.color(dxf.fill?.patternFill?.fgColor) ?? this.color(dxf.fill?.patternFill?.bgColor);
+      if (fill) style.fill = fill;
+      const border = this.border(dxf.border);
+      if (border) style.border = border;
+      const format = attr(dxf.numFmt, 'formatCode');
+      if (format) style.numFmt = format;
+      const horizontal = attr(dxf.alignment, 'horizontal');
+      if (horizontal && ['left', 'center', 'right', 'justify'].includes(horizontal)) style.hAlign = horizontal as HAlign;
+      const vertical = attr(dxf.alignment, 'vertical');
+      if (vertical && ['top', 'center', 'bottom'].includes(vertical)) style.vAlign = vertical === 'center' ? 'middle' : vertical as 'top' | 'bottom';
+      const wrap = attr(dxf.alignment, 'wrapText');
+      if (wrap !== undefined) style.wrap = wrap === '1' || wrap === 'true';
+      return style;
+    });
+    for (const tableStyle of arr(ss.tableStyles?.tableStyle)) {
+      const theme: TableTheme = { body: {}, header: {}, stripe: {} };
+      for (const element of arr(tableStyle.tableStyleElement)) {
+        const style = this.differentials[numAttr(element, 'dxfId') ?? -1] ?? {};
+        const type = attr(element, 'type');
+        if (type === 'wholeTable') theme.body = style;
+        if (type === 'headerRow') theme.header = style;
+        if (type === 'firstRowStripe') theme.stripe = style;
+      }
+      this.tableThemes.set(attr(tableStyle, 'name') ?? '', theme);
+    }
   }
 
   color(c: XNode): string | undefined {
@@ -352,7 +395,17 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
             if (master) formula = shiftFormula(master.formula, r - master.row, colIndex - master.col);
           }
         }
-        if (formula) data.f = stripFutureFunctionPrefixes(formula);
+        if (formula) {
+          data.f = stripFutureFunctionPrefixes(formula);
+          const extent = attr(f, 'ref');
+          if (ftype === 'array' && extent && parseRange(extent)) {
+            try {
+              let supported = true;
+              walk(parseFormula(data.f), (node) => { if (node.type === 'func' && !getFunction(node.name)) supported = false; });
+              if (supported) data.a = extent;
+            } catch { /* Preserve cached values of unsupported formulas. */ }
+          }
+        }
       }
       if (data.v !== undefined || data.f !== undefined || data.s) sheet.cells[formatAddress(r, colIndex)] = data;
     }
@@ -361,6 +414,32 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
 
   const merges = arr(ws.mergeCells?.mergeCell).map((m) => attr(m, 'ref')).filter((m): m is string => !!m && !!parseRange(m));
   if (merges.length) sheet.merges = merges;
+  const conditional: { priority: number; rule: ConditionalFormatRule }[] = [];
+  for (const cf of arr(ws.conditionalFormatting)) {
+    for (const range of (attr(cf, 'sqref') ?? '').trim().split(/\s+/)) {
+      if (!parseRange(range)) continue;
+      for (const node of arr(cf.cfRule)) {
+        const type = attr(node, 'type');
+        const priority = numAttr(node, 'priority') ?? conditional.length + 1;
+        const base = { id: `cf-${conditional.length + 1}`, range, stopIfTrue: attr(node, 'stopIfTrue') === '1' || attr(node, 'stopIfTrue') === 'true' };
+        const formulas = arr(node.formula).map((f) => stripFutureFunctionPrefixes(text(f)));
+        const style = styles.differentials[numAttr(node, 'dxfId') ?? -1] ?? {};
+        const operator = attr(node, 'operator') as ConditionalOperator;
+        let rule: ConditionalFormatRule | undefined;
+        if (type === 'expression' && formulas.length === 1) rule = { ...base, type, formulas, style };
+        if (type === 'cellIs' && CONDITIONAL_OPERATORS.includes(operator) && formulas.length === (['between', 'notBetween'].includes(operator) ? 2 : 1)) rule = { ...base, type, operator, formulas, style };
+        if (type === 'colorScale') {
+          const colors = arr(node.colorScale?.color).map((c) => styles.color(c));
+          const limits = arr(node.colorScale?.cfvo);
+          const supported = attr(limits[0], 'type') === 'min' && attr(limits.at(-1), 'type') === 'max' &&
+            (limits.length === 2 || (limits.length === 3 && attr(limits[1], 'type') === 'percent' && numAttr(limits[1], 'val') === 50));
+          if (supported && [2, 3].includes(colors.length) && colors.every((c): c is string => !!c)) rule = { ...base, type, colors };
+        }
+        if (rule) conditional.push({ priority, rule });
+      }
+    }
+  }
+  if (conditional.length) sheet.conditionalFormats = conditional.sort((a, b) => a.priority - b.priority).map((c) => c.rule);
 
   const pane = arr(ws.sheetViews?.sheetView)[0]?.pane;
   if (pane && (attr(pane, 'state') === 'frozen' || attr(pane, 'state') === 'frozenSplit')) {
@@ -384,6 +463,39 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
       if (charts.length) sheet.charts = charts;
     }
   }
+  for (const part of arr(ws.tableParts?.tablePart)) {
+    const rel = pkg.rels(path).get(attr(part, 'id') ?? '');
+    if (!rel || !rel.type.endsWith('/table')) continue;
+    const table = pkg.xml(rel.target)?.table;
+    const range = attr(table, 'ref');
+    const name = attr(table, 'displayName') ?? attr(table, 'name');
+    if (!range || !parseRange(range) || !name) continue;
+    const style = table.tableStyleInfo;
+    const filters = arr(table.autoFilter?.filterColumn).filter((f) => f.filters !== undefined).map((f) => ({
+      column: numAttr(f, 'colId') ?? -1,
+      values: [...arr(f.filters.filter).map((v) => attr(v, 'val') ?? ''), ...(attr(f.filters, 'blank') === '1' || attr(f.filters, 'blank') === 'true' ? [''] : [])],
+    })).filter((f) => f.column >= 0 && f.column <= parseRange(range)!.range.end.col - parseRange(range)!.range.start.col);
+    (sheet.tables ??= []).push({
+      name, range, headerRow: numAttr(table, 'headerRowCount') !== 0,
+      bandedRows: attr(style, 'showRowStripes') === '1' || attr(style, 'showRowStripes') === 'true',
+      theme: structuredClone(styles.tableThemes.get(attr(style, 'name') ?? '') ?? TABLE_THEMES.blue!),
+      ...(filters.length ? { filters } : {}),
+    });
+    // Excel materializes filter visibility in row@hidden. Keep that visibility derived,
+    // so clearing a filter restores the original/custom row height.
+    if (filters.length) {
+      const bounds = parseRange(range)!.range;
+      for (const row of arr(ws.sheetData?.row)) {
+        const index = (numAttr(row, 'r') ?? 1) - 1;
+        if (index <= bounds.start.row || index > bounds.end.row || rowHeights[index] !== 0) continue;
+        const excluded = filters.some((f) => !f.values.includes(String(sheet.cells[formatAddress(index, bounds.start.col + f.column)]?.v ?? '')));
+        if (!excluded) continue;
+        const height = numAttr(row, 'ht');
+        if (height !== undefined) rowHeights[index] = pointsToPx(height);
+        else delete rowHeights[index];
+      }
+    }
+  }
   return sheet;
 }
 
@@ -392,6 +504,7 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
 // ---------------------------------------------------------------------------
 
 export function xlsxToData(bytes: Uint8Array): WorkbookData {
+  registerBuiltinFunctions();
   const pkg = new Package(bytes);
   const rootRels = pkg.rels('');
   const officeDoc = [...rootRels.values()].find((r) => r.type.endsWith('/officeDocument'))?.target ?? 'xl/workbook.xml';
@@ -424,7 +537,16 @@ export function xlsxToData(bytes: Uint8Array): WorkbookData {
     if (!name || name.startsWith('_xlnm.') || attr(dn, 'localSheetId') !== undefined) continue;
     names[name] = text(dn);
   }
-  const data: WorkbookData = { sheets };
+  const data: WorkbookData = { sheets, xlsxSource: { archive: encodeXlsxArchive(bytes) } };
+  for (const rel of rels.values()) {
+    if (!rel.type.endsWith('/customXml')) continue;
+    const root = pkg.xml(rel.target)?.sheetsPivots;
+    if (!root || attr(root, 'version') !== '1') continue;
+    try {
+      const pivots = JSON.parse(text(root.json));
+      if (Array.isArray(pivots) && pivots.every((p) => p && typeof p.id === 'string' && p.source && p.target && typeof p.source.sheet === 'string' && typeof p.source.range === 'string' && typeof p.target.sheet === 'string' && typeof p.target.cell === 'string' && Array.isArray(p.rows) && Array.isArray(p.values))) data.pivotTables = pivots;
+    } catch { /* Unrecognized custom metadata does not prevent opening a workbook. */ }
+  }
   if (Object.keys(names).length) data.names = names;
   const activeTab = numAttr(arr(wbDoc.bookViews?.workbookView)[0], 'activeTab');
   if (activeTab) data.activeSheet = Math.min(activeTab, sheets.length - 1);

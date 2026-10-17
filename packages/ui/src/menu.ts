@@ -37,8 +37,9 @@ export function showMenu(root: HTMLElement, x: number, y: number, entries: MenuE
   }
   root.appendChild(menu);
   const rect = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
+  const bounds = root.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x - bounds.left, bounds.width - rect.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y - bounds.top, bounds.height - rect.height - 4))}px`;
   openMenu = menu;
   (menu.querySelector('button:not(:disabled)') as HTMLButtonElement | null)?.focus();
   const dismiss = (ev: Event) => {

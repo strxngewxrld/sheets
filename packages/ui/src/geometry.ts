@@ -1,4 +1,4 @@
-import { MAX_COLS, MAX_ROWS, type Sheet } from '@sheets/core';
+import { MAX_COLS, MAX_ROWS, tableFilteredRows, type Sheet } from '@sheets/core';
 
 /** One axis (rows or columns) with variable sizes; O(log n) offset lookups. */
 export class Axis {
@@ -51,6 +51,8 @@ export class Geometry {
   readonly rows: Axis;
   constructor(sheet: Sheet) {
     this.cols = new Axis(sheet.colWidths, sheet.defaultColWidth, MAX_COLS);
-    this.rows = new Axis(sheet.rowHeights, sheet.defaultRowHeight, MAX_ROWS);
+    const sizes = new Map(sheet.rowHeights);
+    for (const row of tableFilteredRows(sheet)) sizes.set(row, 0);
+    this.rows = new Axis(sizes, sheet.defaultRowHeight, MAX_ROWS);
   }
 }

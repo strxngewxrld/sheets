@@ -136,9 +136,20 @@ const FUTURE_FUNCTIONS = new Set([
 ]);
 
 export function addFutureFunctionPrefixes(formula: string): string {
-  return tokenize(formula)
-    .map((t) => (t.type === 'func' && FUTURE_FUNCTIONS.has(t.text.toUpperCase()) ? `_xlfn.${t.text}` : t.text))
-    .join('');
+  const tokens = tokenize(formula);
+  let out = '';
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    let next = i + 1;
+    while (tokens[next]?.type === 'ws') next++;
+    if (t.type === 'ref' && tokens[next]?.text === '#') {
+      out += `_xlfn.ANCHORARRAY(${t.text})`;
+      i = next;
+    } else if (t.type === 'func' && FUTURE_FUNCTIONS.has(t.text.toUpperCase())) {
+      out += `_xlfn.${['FILTER', 'SORT'].includes(t.text.toUpperCase()) ? '_xlws.' : ''}${t.text}`;
+    } else out += t.text;
+  }
+  return out;
 }
 
 export function stripFutureFunctionPrefixes(formula: string): string {

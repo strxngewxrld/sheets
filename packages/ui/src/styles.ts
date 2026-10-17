@@ -165,9 +165,26 @@ export const CSS = `
   height: 26px; border: 1px solid var(--sx-input-border); border-radius: 4px; background: var(--sx-input-bg); color: var(--sx-input-fg); font: inherit; padding: 0 6px;
   user-select: text; -webkit-user-select: text;
 }
+.sx-dialog input[type=number] { height: 26px; border: 1px solid var(--sx-input-border); border-radius: 4px; background: var(--sx-input-bg); color: var(--sx-input-fg); font: inherit; padding: 0 6px; user-select: text; }
+.sx-dialog .sx-actions { flex-wrap: wrap; }
+.sx-format-preview { display: block; padding: 12px; border: 1px solid var(--sx-grid); border-radius: 4px; background: var(--sx-input-bg); color: var(--sx-input-fg); font-size: 16px; text-align: right; user-select: text; }
+.sx-table-preview { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sx-table-preview td { padding: 5px 8px; border: 1px solid var(--sx-grid); }
+.sx-sort-levels { display: grid; gap: 8px; }
+.sx-sort-levels fieldset { display: grid; grid-template-columns: 1fr 28px; gap: 5px; padding: 8px; border: 1px solid var(--sx-grid); border-radius: 4px; min-width: 0; }
+.sx-sort-levels legend { color: var(--sx-muted); font-size: 12px; }
+.sx-sort-levels select { min-width: 0; grid-column: 1; }
+.sx-sort-levels button { grid-column: 2; grid-row: 1 / span 2; border: 0; border-radius: 3px; background: var(--sx-button-hover); color: inherit; cursor: pointer; }
+.sx-table-controls { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.sx-table-sort { position: absolute; pointer-events: auto; width: 16px; height: 18px; padding: 0; border: 1px solid currentColor; border-radius: 2px; background: transparent; font: 11px sans-serif; cursor: pointer; opacity: 0.85; }
+.sx-table-sort:hover, .sx-table-sort:focus-visible { opacity: 1; background: rgba(128,128,128,0.3); outline: 1px solid var(--sx-accent); }
 .sx-dialog .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .sx-dialog .sx-actions button { height: 28px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--sx-input-border); background: var(--sx-input-bg); color: inherit; cursor: pointer; font: inherit; }
 .sx-dialog .sx-actions button.sx-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
+.sx-analysis-dialog { max-height: calc(100% - 32px); overflow: auto; }
+.sx-analysis-dialog [hidden] { display: none; }
+.sx-analysis-dialog select[multiple] { height: auto; min-height: 72px; padding: 4px; }
+.sx-analysis-dialog [role=alert] { color: #C00000; white-space: normal; }
 @media (max-width: 600px) {
   .sx-namebox { width: 64px; }
   .sx-status .sx-optional { display: none; }

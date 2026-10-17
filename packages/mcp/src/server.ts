@@ -29,6 +29,7 @@ interface Entry {
   wb: Workbook;
   mtimeMs: number;
   dirty: boolean;
+  original?: Uint8Array;
 }
 const cache = new Map<string, Entry>();
 
@@ -50,18 +51,27 @@ async function load(path: string, create = false): Promise<Entry> {
   }
   const cached = cache.get(path);
   if (cached && (cached.dirty || cached.mtimeMs === mtimeMs)) return cached;
-  const wb = mtimeMs < 0 ? new Workbook() : openWorkbook(await readFile(path), path);
-  const entry = { wb, mtimeMs, dirty: false };
+  const original = mtimeMs < 0 ? undefined : await readFile(path);
+  const wb = original ? openWorkbook(original, path) : new Workbook();
+  const entry = { wb, mtimeMs, dirty: false, original };
   cache.set(path, entry);
   return entry;
 }
 
 async function save(path: string, entry: Entry, target = path): Promise<void> {
+  const bytes = saveWorkbook(entry.wb, formatFromFileName(target));
+  if (target === path) {
+    const current = await readFile(path).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+    if (entry.original ? !current || current.length !== entry.original.length || current.some((value, index) => value !== entry.original![index]) : current !== undefined) {
+      throw new Error('File changed externally; it was not overwritten. Save to a new file or reload.');
+    }
+  }
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, saveWorkbook(entry.wb, formatFromFileName(target)));
+  await writeFile(target, bytes);
   if (target === path) {
     entry.mtimeMs = (await stat(path)).mtimeMs;
     entry.dirty = false;
+    entry.original = bytes;
   }
 }
 
@@ -119,7 +129,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (name === 'create_workbook') {
       const exists = await stat(path).then(() => true, () => false);
       if (exists && !input.overwrite) return text(`File already exists: ${path}`, true);
-      const entry: Entry = { wb: new Workbook({ sheetName: typeof input.sheet_name === 'string' ? input.sheet_name : 'Sheet1' }), mtimeMs: -1, dirty: true };
+      const entry: Entry = { wb: new Workbook({ sheetName: typeof input.sheet_name === 'string' ? input.sheet_name : 'Sheet1' }), mtimeMs: -1, dirty: true, original: exists ? await readFile(path) : undefined };
       cache.set(path, entry);
       await save(path, entry);
       return text(`Created ${path}`);

@@ -95,6 +95,11 @@ class Parser {
     for (;;) {
       const t = this.peek();
       if (!t || t.type !== 'op') break;
+      if (t.text === '#') {
+        this.pos++;
+        left = { type: 'spill', arg: left };
+        continue;
+      }
       if (t.text === '%') {
         if (PERCENT_PRECEDENCE < minPrec) break;
         this.pos++;
@@ -159,7 +164,7 @@ class Parser {
       if (sep.type === 'rparen') break;
       if (sep.type !== 'comma') throw new FormulaParseError(`Expected "," or ")" but found "${sep.text}"`, sep.start);
     }
-    return { type: 'func', name, args };
+    return name === 'ANCHORARRAY' && args.length === 1 ? { type: 'spill', arg: args[0]! } : { type: 'func', name, args };
   }
 
   private arrayLiteral(): Node {
@@ -189,6 +194,7 @@ export function walk(node: Node, visit: (n: Node) => void): void {
       break;
     case 'unary':
     case 'percent':
+    case 'spill':
       walk(node.arg, visit);
       break;
     case 'binary':

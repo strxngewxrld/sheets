@@ -5,6 +5,7 @@ import {
   keyToAddress,
   MAX_COLS,
   MAX_ROWS,
+  parseRange,
   rangesIntersect,
   type RangeAddress,
 } from './address.js';
@@ -108,7 +109,7 @@ export function clearRange(wb: Workbook, sheet: string | number, range: RangeAdd
       data = Sheet.cellToData(cell);
       if (data) delete data.s;
     }
-    cells.push({ row, col, data: data && Object.keys(data).length ? data : null });
+    cells.push({ row, col, data: data && Object.keys(data).length ? data : null, styleOnly: mode === 'formats' });
   }
   wb.apply({ type: 'setCells', sheet: s.name, cells }, options);
 }
@@ -121,6 +122,7 @@ export function applyStyle(wb: Workbook, sheet: string | number, range: RangeAdd
   const s = wb.requireSheet(sheet);
   const target = clipToUsed(s, range);
   if (!target) return;
+  if ((target.end.row - target.start.row + 1) * (target.end.col - target.start.col + 1) > 1_000_000) throw new Error('Format range exceeds the cell limit');
   const cells: CellPatch[] = [];
   for (let r = target.start.row; r <= target.end.row; r++) {
     for (let c = target.start.col; c <= target.end.col; c++) {
@@ -129,7 +131,7 @@ export function applyStyle(wb: Workbook, sheet: string | number, range: RangeAdd
       const style = applyStylePatch(cell?.style, patch);
       if (style) data.s = style;
       else delete data.s;
-      cells.push({ row: r, col: c, data: Object.keys(data).length ? data : null });
+      cells.push({ row: r, col: c, data: Object.keys(data).length ? data : null, styleOnly: true });
     }
   }
   wb.apply({ type: 'setCells', sheet: s.name, cells }, options);
@@ -160,7 +162,7 @@ export function applyBorders(
       const style = applyStylePatch(cell?.style, { border: border ?? null });
       if (style) data.s = style;
       else delete data.s;
-      cells.push({ row: r, col: c, data: Object.keys(data).length ? data : null });
+      cells.push({ row: r, col: c, data: Object.keys(data).length ? data : null, styleOnly: true });
     }
   }
   wb.apply({ type: 'setCells', sheet: s.name, cells }, options);
@@ -168,6 +170,7 @@ export function applyBorders(
 
 export function mergeCells(wb: Workbook, sheet: string | number, range: RangeAddress, options: ApplyOptions = {}): void {
   const s = wb.requireSheet(sheet);
+  if (s.tables.some((table) => rangesIntersect(parseRange(table.range)!.range, range))) throw new Error('Cannot merge cells inside a table');
   const merges = s.merges.filter((m) => !rangesIntersect(m, range)).map((m) => formatRange(m));
   merges.push(formatRange(range));
   // Excel keeps only the top-left value.
@@ -200,18 +203,28 @@ export interface ClipboardData {
   range: RangeAddress;
   cells: (CellData | null)[][];
   cut?: boolean;
+  /** Relative output cells whose formula anchor is included in this copy. */
+  derived?: { row: number; col: number }[];
 }
 
 export function copyRange(wb: Workbook, sheet: string | number, range: RangeAddress): ClipboardData {
   const s = wb.requireSheet(sheet);
   const r = clipToUsed(s, range) ?? range;
   const cells: (CellData | null)[][] = [];
+  const derived: { row: number; col: number }[] = [];
   for (let row = r.start.row; row <= r.end.row; row++) {
     const line: (CellData | null)[] = [];
-    for (let col = r.start.col; col <= r.end.col; col++) line.push(Sheet.cellToData(s.getCell(row, col)));
+    for (let col = r.start.col; col <= r.end.col; col++) {
+      const cell = s.getCell(row, col);
+      line.push(Sheet.cellToData(cell));
+      if (cell?.spillParent !== undefined) {
+        const parent = keyToAddress(cell.spillParent);
+        if (parent.row >= r.start.row && parent.row <= r.end.row && parent.col >= r.start.col && parent.col <= r.end.col) derived.push({ row: row - r.start.row, col: col - r.start.col });
+      }
+    }
     cells.push(line);
   }
-  return { sheet: s.name, range: r, cells };
+  return { sheet: s.name, range: r, cells, ...(derived.length ? { derived } : {}) };
 }
 
 export type PasteMode = 'all' | 'values' | 'formats' | 'formulas';
@@ -238,6 +251,7 @@ export function pasteRange(
   const repC = tCols % srcCols === 0 ? tCols / srcCols : 1;
   const cells: CellPatch[] = [];
   const written = new Set<string>();
+  const derived = new Set(clip.derived?.map((p) => `${p.row},${p.col}`));
   for (let rr = 0; rr < repR; rr++) {
     for (let rc = 0; rc < repC; rc++) {
       clip.cells.forEach((line, i) =>
@@ -250,6 +264,7 @@ export function pasteRange(
           const dRow = row - (clip.range.start.row + i);
           const dCol = col - (clip.range.start.col + j);
           const shifted: CellData | null = src ? { ...src } : null;
+          if (shifted && derived.has(`${i},${j}`) && (mode === 'all' || mode === 'formulas')) delete shifted.v;
           if (shifted?.f !== undefined) shifted.f = clip.cut ? shifted.f : shiftFormula(shifted.f, dRow, dCol);
           switch (mode) {
             case 'values':
@@ -266,7 +281,7 @@ export function pasteRange(
               data = shifted;
           }
           written.add(`${row},${col}`);
-          cells.push({ row, col, data: data && Object.keys(data).length ? data : null });
+          cells.push({ row, col, data: data && Object.keys(data).length ? data : null, styleOnly: mode === 'formats' });
         }),
       );
     }
@@ -285,9 +300,9 @@ export function pasteRange(
           if (src.getCell(row, col)) clear.push({ row, col, data: null });
         }
       }
-      if (clear.length) wb.apply({ type: 'setCells', sheet: src.name, cells: clear });
+      if (clear.length) wb.apply({ type: 'setCells', sheet: src.name, cells: clear, reordersCells: true });
     }
-    wb.apply({ type: 'setCells', sheet: s.name, cells });
+    wb.apply({ type: 'setCells', sheet: s.name, cells, ...(clip.cut ? { reordersCells: true } : {}) });
   }, options);
   return pasted;
 }
@@ -391,6 +406,13 @@ export function sortRange(
   const r = clipToUsed(s, range);
   if (!r) return;
   const firstRow = r.start.row + (options.hasHeader ? 1 : 0);
+  if (!keys.length || keys.some((k) => !Number.isInteger(k.col) || k.col < r.start.col || k.col > r.end.col)) throw new Error('Sort columns must be inside the selected range');
+  if ((r.end.row - firstRow + 1) * (r.end.col - r.start.col + 1) > 1_000_000) throw new Error('Sort range exceeds the cell limit');
+  if (s.merges.some((merge) => rangesIntersect(merge, r))) throw new Error('Cannot sort a range containing merged cells');
+  for (const [key, cell] of s.cells) {
+    const p = keyToAddress(key);
+    if (p.row >= r.start.row && p.row <= r.end.row && p.col >= r.start.col && p.col <= r.end.col && (cell.spillParent !== undefined || cell.spillRange)) throw new Error('Cannot sort a spilled array. Use the SORT formula instead.');
+  }
   const rows: { orig: number; cells: (CellData | null)[]; keys: Scalar[] }[] = [];
   for (let row = firstRow; row <= r.end.row; row++) {
     const cells: (CellData | null)[] = [];
@@ -420,7 +442,7 @@ export function sortRange(
       cells.push({ row, col: r.start.col + j, data });
     });
   });
-  wb.apply({ type: 'setCells', sheet: s.name, cells }, options);
+  wb.apply({ type: 'setCells', sheet: s.name, cells, reordersCells: true }, options);
 }
 
 // ---------------------------------------------------------------------------

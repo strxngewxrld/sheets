@@ -1,6 +1,6 @@
-import { cellKey, keyToAddress, MAX_COLS, MAX_ROWS, parseRange, type RangeAddress } from './address.js';
+import { cellKey, keyToAddress, MAX_COLS, MAX_ROWS, parseRange, rangesIntersect, type RangeAddress } from './address.js';
 import type { Node } from './formula/ast.js';
-import { evaluateCell, type EvalContext, type Matrix } from './formula/evaluator.js';
+import { deref, evaluate, evaluateCell, isRef, type EvalContext, type Matrix } from './formula/evaluator.js';
 import { parseFormula, walk } from './formula/parser.js';
 import { getFunction } from './formula/registry.js';
 import type { Sheet } from './sheet.js';
@@ -46,6 +46,9 @@ export class CalcEngine {
   private pending = new Set<number>();
   private computing = new Set<number>();
   private astCache = new Map<string, Node | CellError>();
+  private spillOwners = new Map<number, number>();
+  private previousSpillOwners = new Map<number, number>();
+  private arrays = new Set<number>();
 
   constructor(wb: Workbook) {
     this.wb = wb;
@@ -71,13 +74,21 @@ export class CalcEngine {
 
   /** Rebuilds the full dependency graph from the workbook contents. */
   rebuild(): void {
+    this.spillOwners.clear();
+    this.previousSpillOwners.clear();
+    this.arrays.clear();
     this.formulas.clear();
     this.dependents.clear();
     this.rangeDeps.clear();
     for (const sheet of this.wb.sheets) {
       for (const [key, cell] of sheet.cells) {
-        if (cell.formula === undefined) continue;
         const { row, col } = keyToAddress(key);
+        if (cell.spillParent !== undefined) {
+          const parent = keyToAddress(cell.spillParent);
+          this.spillOwners.set(gid(sheet.id, row, col), gid(sheet.id, parent.row, parent.col));
+        }
+        if (cell.spillRange) this.arrays.add(gid(sheet.id, row, col));
+        if (cell.formula === undefined) continue;
         this.register(sheet, row, col, cell.formula);
       }
     }
@@ -132,6 +143,7 @@ export class CalcEngine {
   }
 
   private unregister(id: number): void {
+    this.arrays.delete(id);
     const info = this.formulas.get(id);
     if (!info) return;
     this.formulas.delete(id);
@@ -150,6 +162,7 @@ export class CalcEngine {
   /** Recalculates everything that depends on the given changed cells. */
   recalc(changed: Iterable<number>): void {
     const changedList = [...changed];
+    if (this.arrays.size || this.spillOwners.size) return this.recalcAll();
     if (changedList.length > FULL_RECALC_THRESHOLD) return this.recalcAll();
     const dirty = new Set<number>();
     const queue: number[] = [];
@@ -180,12 +193,75 @@ export class CalcEngine {
   }
 
   private evaluate(dirty: Set<number>): void {
-    this.pending = dirty;
-    this.computing.clear();
-    // Row-major order keeps on-demand recursion shallow for typical top-down sheets.
-    const order = [...dirty].sort((a, b) => a - b);
-    for (const id of order) this.compute(id);
-    this.pending = new Set();
+    // Discover spill ownership before trusting dependencies on former blank cells.
+    // Further passes are needed only when output rectangles change, not values.
+    for (let pass = 0; pass < Math.min(this.formulas.size + 2, 100); pass++) {
+      this.previousSpillOwners = this.spillOwners;
+      this.spillOwners = new Map();
+      this.clearSpills();
+      this.pending = new Set(dirty);
+      this.computing.clear();
+      for (const id of [...dirty].sort((a, b) => a - b)) this.compute(id);
+      this.pending.clear();
+      const stable = this.spillOwners.size === this.previousSpillOwners.size &&
+        [...this.spillOwners].every(([key, owner]) => this.previousSpillOwners.get(key) === owner);
+      if (stable) {
+        this.previousSpillOwners.clear();
+        return;
+      }
+      dirty = new Set(this.formulas.keys());
+    }
+    this.clearSpills();
+    for (const id of this.arrays) {
+      const { sheetId, row, col } = splitGid(id);
+      const cell = this.wb.getSheetById(sheetId)?.getCell(row, col);
+      if (cell) cell.value = new CellError('#CALC!', 'Array dimensions did not stabilize');
+    }
+    this.spillOwners.clear();
+    this.previousSpillOwners.clear();
+  }
+
+  /** Discards derived output, keeping user formatting and formula anchors. */
+  clearSpills(): void {
+    for (const sheet of this.wb.sheets) {
+      for (const [key, cell] of sheet.cells) {
+        delete cell.spillRange;
+        if (cell.spillParent === undefined) continue;
+        if (cell.style) sheet.cells.set(key, { value: null, style: cell.style });
+        else sheet.cells.delete(key);
+      }
+      sheet.invalidate();
+    }
+  }
+
+  private spill(sheet: Sheet, row: number, col: number, matrix: Matrix): Scalar {
+    const rows = matrix.length;
+    const cols = matrix[0]?.length ?? 0;
+    if (!rows || !cols || matrix.some((r) => r.length !== cols)) return new CellError('#CALC!', 'Invalid array shape');
+    const range = { start: { row, col }, end: { row: row + rows - 1, col: col + cols - 1 } };
+    if (range.end.row >= MAX_ROWS || range.end.col >= MAX_COLS) return new CellError('#SPILL!', 'Array extends beyond the sheet');
+    if (sheet.tables.some((t) => rangesIntersect(range, parseRange(t.range)!.range))) return new CellError('#SPILL!', 'Arrays cannot spill into tables');
+    for (let r = row; r <= range.end.row; r++) {
+      for (let c = col; c <= range.end.col; c++) {
+        const existing = sheet.getCell(r, c);
+        if (sheet.mergeAt(r, c) || ((r !== row || c !== col) && existing && (existing.formula !== undefined || existing.value !== null || existing.spillParent !== undefined))) {
+          return new CellError('#SPILL!', 'Array output is blocked by a cell or merge');
+        }
+      }
+    }
+    sheet.getCell(row, col)!.spillRange = range;
+    const anchor = gid(sheet.id, row, col);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (r === 0 && c === 0) continue;
+        const key = cellKey(row + r, col + c);
+        const style = sheet.cells.get(key)?.style;
+        sheet.cells.set(key, { value: matrix[r]![c] ?? 0, style, spillParent: cellKey(row, col) });
+        this.spillOwners.set(gid(sheet.id, row + r, col + c), anchor);
+      }
+    }
+    sheet.invalidate();
+    return matrix[0]![0] ?? 0;
   }
 
   /** Computes a pending formula after its pending single-cell precedents (iterative DFS). */
@@ -201,7 +277,8 @@ export class CalcEngine {
         continue;
       }
       const info = this.formulas.get(top);
-      const next = info?.cellRefs.find((p) => this.pending.has(p) && !onStack.has(p) && !this.computing.has(p));
+      const next = info?.cellRefs.map((p) => this.spillOwners.get(p) ?? this.previousSpillOwners.get(p) ?? p)
+        .find((p) => this.pending.has(p) && !onStack.has(p) && !this.computing.has(p));
       if (next !== undefined) {
         stack.push(next);
         onStack.add(next);
@@ -227,7 +304,16 @@ export class CalcEngine {
     if (info.unsupported && cell.cached) return; // keep the value Excel computed
     this.computing.add(id);
     try {
-      cell.value = evaluateCell(info.ast!, this.contextFor(sheet, info.row, info.col));
+      const ctx = this.contextFor(sheet, info.row, info.col);
+      const result = evaluate(info.ast!, ctx);
+      const output = isRef(result) ? deref(result, ctx) : result;
+      if (Array.isArray(output)) {
+        this.arrays.add(id);
+        cell.value = this.spill(sheet, info.row, info.col, output);
+      } else {
+        this.arrays.delete(id);
+        cell.value = output ?? 0;
+      }
     } catch (e) {
       cell.value = e instanceof RangeError ? new CellError('#CALC!', 'Recursion too deep') : new CellError('#VALUE!', String(e));
     } finally {
@@ -239,6 +325,11 @@ export class CalcEngine {
   /** Value of a cell, computing it first if it is pending. */
   private valueOf(sheet: Sheet, row: number, col: number): Scalar {
     const id = gid(sheet.id, row, col);
+    const owner = this.spillOwners.get(id) ?? this.previousSpillOwners.get(id);
+    if (owner !== undefined) {
+      if (this.computing.has(owner)) return Err.CIRC;
+      if (this.pending.has(owner)) this.compute(owner);
+    }
     if (this.computing.has(id)) return Err.CIRC;
     if (this.pending.has(id)) this.compute(id);
     if (this.computing.has(id)) return Err.CIRC;
@@ -274,6 +365,13 @@ export class CalcEngine {
         return ast instanceof CellError ? undefined : ast;
       },
       hasFormula: (name, r, c) => wb.getSheet(name)?.getCell(r, c)?.formula !== undefined,
+      getSpillRange: (name, r, c) => {
+        const target = wb.getSheet(name);
+        if (!target) return Err.REF;
+        this.valueOf(target, r, c);
+        if (this.computing.has(gid(target.id, r, c))) return Err.CIRC;
+        return target.getCell(r, c)?.spillRange ?? Err.REF;
+      },
     };
   }
 

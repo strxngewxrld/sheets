@@ -1,4 +1,4 @@
-import { cellKey, colToName, formatGeneral, formatValueEx, type CellStyle, type FormatLocale, type RangeAddress, type Sheet } from '@sheets/core';
+import { cellKey, colToName, formatGeneral, formatValueEx, parseRange, tableAt, type CellStyle, type FormatLocale, type RangeAddress, type Sheet } from '@sheets/core';
 import type { Geometry } from './geometry.js';
 
 export interface GridTheme {
@@ -90,6 +90,7 @@ export class Viewport {
 }
 
 export interface RenderState {
+  cellStyle?: (row: number, col: number) => CellStyle | undefined;
   selection: RangeAddress;
   active: { row: number; col: number };
   highlights: Highlight[];
@@ -177,6 +178,7 @@ export class GridRenderer {
     const ctx = this.ctx;
     const t = this.theme;
     const sheet = vp.sheet;
+    const styleAt = state.cellStyle ?? ((r: number, c: number) => sheet.getCell(r, c)?.style);
     const { clip } = pane;
     if (clip.w <= 0 || clip.h <= 0) return;
     ctx.save();
@@ -207,7 +209,7 @@ export class GridRenderer {
       const h = ry(r + 1) - ry(r);
       if (h <= 0) continue;
       for (let c = c0; c <= c1; c++) {
-        const fill = sheet.getCell(r, c)?.style?.fill;
+        const fill = styleAt(r, c)?.fill;
         if (!fill || covered.has(cellKey(r, c))) continue;
         ctx.fillStyle = fill;
         ctx.fillRect(cx(c), ry(r), cx(c + 1) - cx(c), h);
@@ -233,7 +235,7 @@ export class GridRenderer {
     // 3. Merged cell backgrounds
     for (const m of merges) {
       const rc = vp.rect(m);
-      ctx.fillStyle = sheet.getCell(m.start.row, m.start.col)?.style?.fill ?? t.bg;
+      ctx.fillStyle = styleAt(m.start.row, m.start.col)?.fill ?? t.bg;
       ctx.fillRect(rc.x, rc.y, rc.w - 1, rc.h - 1);
     }
 
@@ -246,35 +248,40 @@ export class GridRenderer {
         const key = cellKey(r, c);
         if (covered.has(key)) continue;
         const cell = sheet.getCell(r, c);
+        const style = styleAt(r, c);
         if (!cell || cell.value === null) continue;
         let w = cx(c + 1) - cx(c);
         if (w <= 0) continue;
+        const table = tableAt(sheet, r, c);
+        const tableHeader = table?.headerRow && parseRange(table.range)!.range.start.row === r;
+        if (tableHeader) w = Math.max(0, w - 18);
         // Left-aligned text overflows into empty neighbours.
         let spill = 0;
         const isText = typeof cell.value === 'string';
-        const align = cell.style?.hAlign ?? (typeof cell.value === 'number' ? 'right' : typeof cell.value === 'string' ? 'left' : 'center');
-        if (isText && align === 'left' && !cell.style?.wrap) {
+        const align = style?.hAlign ?? (typeof cell.value === 'number' ? 'right' : typeof cell.value === 'string' ? 'left' : 'center');
+        if (isText && align === 'left' && !style?.wrap && !tableHeader) {
           let nc = c + 1;
-          while (nc <= c1 + 20 && sheet.getValue(r, nc) === null && !covered.has(cellKey(r, nc)) && !sheet.getCell(r, nc)?.style?.fill) {
+          while (nc <= c1 + 20 && sheet.getValue(r, nc) === null && !covered.has(cellKey(r, nc)) && !styleAt(r, nc)?.fill) {
             spill += vp.geo.cols.size(nc);
             nc++;
           }
         }
-        this.drawCellText(vp, state, cell.value, cell.style, cx(c), y, w, h, spill, align);
+        this.drawCellText(vp, state, cell.value, style, cx(c), y, w, h, spill, align);
       }
     }
     for (const m of merges) {
       const cell = sheet.getCell(m.start.row, m.start.col);
+      const style = styleAt(m.start.row, m.start.col);
       if (!cell || cell.value === null) continue;
       const rc = vp.rect(m);
-      const align = cell.style?.hAlign ?? (typeof cell.value === 'number' ? 'right' : typeof cell.value === 'string' ? 'left' : 'center');
-      this.drawCellText(vp, state, cell.value, cell.style, rc.x, rc.y, rc.w, rc.h, 0, align);
+      const align = style?.hAlign ?? (typeof cell.value === 'number' ? 'right' : typeof cell.value === 'string' ? 'left' : 'center');
+      this.drawCellText(vp, state, cell.value, style, rc.x, rc.y, rc.w, rc.h, 0, align);
     }
 
     // 5. Borders
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
-        const b = sheet.getCell(r, c)?.style?.border;
+        const b = styleAt(r, c)?.border;
         if (!b) continue;
         const m = merges.find((mm) => mm.start.row === r && mm.start.col === c);
         const rc = m ? vp.rect(m) : { x: cx(c), y: ry(r), w: cx(c + 1) - cx(c), h: ry(r + 1) - ry(r) };

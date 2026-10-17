@@ -33,6 +33,18 @@ export function decodeOoxmlEscapes(s: string): string {
   return s.replace(/_x([0-9A-Fa-f]{4})_/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
 }
 
+/** Preserve literal escape sequences and UTF-16 characters not representable in XML 1.0. */
+export function encodeOoxmlEscapes(s: string): string {
+  const escape = (c: string) => `_x${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`;
+  return s.replace(/_x[0-9a-f]{4}_/gi, (m) => '_x005F_' + m.slice(1))
+    .replace(/[\u0000-\u0008\u000B-\u001F\uFFFE\uFFFF]/g, escape)
+    .replace(/[\uD800-\uDFFF]/g, (c, index: number, whole: string) => {
+      const code = c.charCodeAt(0);
+      const paired = code <= 0xDBFF ? /[\uDC00-\uDFFF]/.test(whole[index + 1] ?? '') : /[\uD800-\uDBFF]/.test(whole[index - 1] ?? '');
+      return paired ? c : escape(c);
+    });
+}
+
 export function arr<T = XNode>(x: T | T[] | undefined | null): T[] {
   if (x === undefined || x === null) return [];
   return Array.isArray(x) ? x : [x];

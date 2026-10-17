@@ -1,0 +1,8 @@
+{
+  "extension.description": "Edit Excel and CSV files directly in VS Code, with formulas, table filters, formatting, charts and AI agent tools.",
+  "command.newWorkbook": "New Workbook",
+  "command.openFile": "Open Spreadsheet…",
+  "command.openWithSheets": "Open with Sheets",
+  "configuration.headlessWrites": "Allow AI agent tools to modify spreadsheet files that are not open in an editor. Changes are saved to disk. Requires a trusted workspace.",
+  "workspaceTrust.description": "The spreadsheet editor is available in Restricted Mode. AI agent tools can modify unopened files only in trusted workspaces."
+}

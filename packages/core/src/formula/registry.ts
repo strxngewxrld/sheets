@@ -1,7 +1,7 @@
 import type { Node } from './ast.js';
 import type { EvalValue, FunctionContext } from './evaluator.js';
 
-export type FunctionCategory = 'math' | 'statistical' | 'logical' | 'lookup' | 'text' | 'date' | 'info';
+export type FunctionCategory = 'math' | 'statistical' | 'financial' | 'logical' | 'lookup' | 'text' | 'date' | 'info';
 
 interface FunctionDefBase {
   name: string;

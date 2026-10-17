@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { openWorkbook, saveWorkbook, formatFromFileName, Workbook, writeXlsx } from '@sheets/core';
-import { resultToText, SpreadsheetAgent, TOOL_DEFINITIONS, type ToolResult } from '@sheets/agent';
+import { SpreadsheetAgent, TOOL_DEFINITIONS, type ToolResult } from '@sheets/agent';
 import { SpreadsheetEditorProvider } from './provider.js';
-import { TOOL_PREFIX } from './tool-manifest.js';
+import { registerCopilotTools } from './copilot.js';
 
 export interface SheetsApi {
   /** Tool definitions (name, description, JSON schema). */
@@ -21,6 +21,16 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
   provider = SpreadsheetEditorProvider.register(context);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('sheets.openFile', async () => {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { Spreadsheets: ['xlsx', 'csv', 'tsv'] },
+      });
+      const target = selected?.[0];
+      if (!target) return;
+      const csv = /\.(csv|tsv)$/i.test(target.path);
+      await vscode.commands.executeCommand('vscode.openWith', target, csv ? 'sheets.csv' : 'sheets.spreadsheet');
+    }),
     vscode.commands.registerCommand('sheets.newWorkbook', async () => {
       const target = await vscode.window.showSaveDialog({
         filters: { 'Excel Workbook': ['xlsx'] },
@@ -43,35 +53,7 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
     ),
   );
 
-  // Language model tools (usable by Copilot agent mode and other chat participants).
-  if (vscode.lm?.registerTool) {
-    for (const def of TOOL_DEFINITIONS) {
-      context.subscriptions.push(
-        vscode.lm.registerTool<Record<string, unknown>>(`${TOOL_PREFIX}${def.name}`, {
-          prepareInvocation: (options) => {
-            const file = typeof options.input.file === 'string' ? options.input.file : undefined;
-            const target = file ?? provider.activeDocument?.uri.path.split('/').pop() ?? 'active spreadsheet';
-            return {
-              invocationMessage: `Sheets: ${def.name.replace(/_/g, ' ')} (${target})`,
-              ...(def.readOnly
-                ? {}
-                : {
-                    confirmationMessages: {
-                      title: `Sheets: ${def.name.replace(/_/g, ' ')}`,
-                      message: new vscode.MarkdownString(`Modify **${target}**?\n\n\`\`\`json\n${JSON.stringify(options.input, null, 2).slice(0, 2000)}\n\`\`\``),
-                    },
-                  }),
-            };
-          },
-          invoke: async (options) => {
-            const { file, ...input } = options.input;
-            const result = await executeTool(def.name, input, typeof file === 'string' ? file : undefined);
-            return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(resultToText(result))]);
-          },
-        }),
-      );
-    }
-  }
+  registerCopilotTools(context, executeTool, () => provider.activeDocument?.uri.path.split('/').pop());
 
   return { tools: TOOL_DEFINITIONS, executeTool };
 }
@@ -104,19 +86,36 @@ async function executeTool(name: string, input: Record<string, unknown>, file?: 
   }
 
   // Headless: load, run, save.
+  if (!def.readOnly && !vscode.workspace.isTrusted) {
+    return { ok: false, error: 'Trust this workspace before allowing agents to modify unopened spreadsheet files.' };
+  }
   if (!def.readOnly && !vscode.workspace.getConfiguration('sheets').get<boolean>('agentTools.headlessWrites', true)) {
     return { ok: false, error: 'Modifying files that are not open is disabled (setting sheets.agentTools.headlessWrites). Open the file in the Sheets editor first.' };
   }
   let wb: Workbook;
+  let original: Uint8Array | undefined;
   try {
-    wb = openWorkbook(await vscode.workspace.fs.readFile(uri), uri.path);
+    original = await vscode.workspace.fs.readFile(uri);
+    wb = openWorkbook(original, uri.path);
   } catch (e) {
     if (name === 'write_range' && (e as { code?: string }).code === 'FileNotFound') wb = new Workbook();
     else return { ok: false, error: `Cannot open ${uri.fsPath}: ${(e as Error).message}` };
   }
   const result = new SpreadsheetAgent(wb).execute(name, input);
   if (result.ok && !def.readOnly) {
-    await vscode.workspace.fs.writeFile(uri, saveWorkbook(wb, formatFromFileName(uri.path)));
+    try {
+      const bytes = saveWorkbook(wb, formatFromFileName(uri.path));
+      const current = await Promise.resolve(vscode.workspace.fs.readFile(uri)).catch((error: { code?: string }) => {
+        if (error.code === 'FileNotFound') return undefined;
+        throw error;
+      });
+      if (original ? !current || current.length !== original.length || current.some((value, index) => value !== original![index]) : current !== undefined) {
+        return { ok: false, error: 'Sheets: Die Datei wurde während der Bearbeitung extern verändert und nicht überschrieben.' };
+      }
+      await vscode.workspace.fs.writeFile(uri, bytes);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
   return result;
 }

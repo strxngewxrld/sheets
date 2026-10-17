@@ -1,17 +1,22 @@
 import { cellKey, formatRange, keyToAddress, parseRange, MAX_COLS, MAX_ROWS, type RangeAddress } from './address.js';
 import { CalcEngine, gid } from './calc.js';
 import type { ChartSpec } from './chart.js';
+import { ConditionalFormatEvaluator, validateConditionalFormats } from './conditional.js';
 import { Emitter } from './events.js';
 import { registerBuiltinFunctions } from './formula/functions/index.js';
 import {
   adjustFormulaForStructure,
   invalidateSheetRefs,
   renameSheetInFormula,
+  shiftFormula,
   type StructuralChange,
 } from './formula/rewrite.js';
 import type { Operation, WorkbookData } from './ops.js';
 import { Sheet, type Cell, type SheetData } from './sheet.js';
 import type { Scalar } from './values.js';
+import type { CellStyle } from './style.js';
+import { adjustPivotForStructure, type PivotTableSpec } from './pivot.js';
+import { validateTables } from './table.js';
 
 export interface ChangeEvent {
   ops: Operation[];
@@ -54,6 +59,8 @@ export class Workbook {
   readonly events = new Emitter<WorkbookEvents>();
   readonly calc: CalcEngine;
   historyLimit = 500;
+  pivotTables: PivotTableSpec[] = [];
+  xlsxSource?: WorkbookData['xlsxSource'];
 
   private undoStack: HistoryEntry[] = [];
   private redoStack: HistoryEntry[] = [];
@@ -76,11 +83,15 @@ export class Workbook {
     const data: WorkbookData = { sheets: this.sheets.map((s) => s.toJSON()) };
     if (this.names.size) data.names = Object.fromEntries([...this.names.values()].map((n) => [n.name, n.ref]));
     if (this.activeSheetIndex) data.activeSheet = this.activeSheetIndex;
+    if (this.pivotTables.length) data.pivotTables = structuredClone(this.pivotTables);
+    if (this.xlsxSource) data.xlsxSource = structuredClone(this.xlsxSource);
     return data;
   }
 
   /** Replaces the whole content without history (used by importers). */
   load(data: WorkbookData, options: { recalculate?: boolean } = {}): void {
+    this.xlsxSource = structuredClone(data.xlsxSource);
+    this.pivotTables = structuredClone(data.pivotTables ?? []);
     this.sheets = data.sheets.map((s) => Sheet.fromJSON(s));
     if (!this.sheets.length) this.sheets.push(new Sheet('Sheet1'));
     this.names.clear();
@@ -88,6 +99,11 @@ export class Workbook {
     this.activeSheetIndex = Math.min(data.activeSheet ?? 0, this.sheets.length - 1);
     this.calc.rebuild();
     if (options.recalculate !== false) this.calc.recalcAll();
+    if (this.xlsxSource && !this.xlsxSource.baseline) {
+      const baseline = this.toJSON();
+      delete baseline.xlsxSource;
+      this.xlsxSource.baseline = baseline;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -151,6 +167,9 @@ export class Workbook {
     try {
       for (const op of list) {
         const inverse = this.applyOp(op, tx);
+        if (this.xlsxSource && (['insertRows', 'deleteRows', 'insertCols', 'deleteCols', 'addSheet', 'removeSheet', 'renameSheet', 'moveSheet'].includes(op.type) || (op.type === 'setCells' && op.reordersCells))) {
+          this.xlsxSource.structuralEdits = Math.max(0, (this.xlsxSource.structuralEdits ?? 0) + (options.origin === 'undo' ? -1 : 1));
+        }
         tx.ops.push(op);
         tx.inverse.unshift(...inverse);
       }
@@ -225,15 +244,23 @@ export class Workbook {
     switch (op.type) {
       case 'setCells': {
         const sheet = this.requireSheet(op.sheet);
-        const prev = op.cells.map(({ row, col, data }) => {
-          const before = Sheet.cellToData(sheet.getCell(row, col));
-          const cell: Cell | undefined = data ? Sheet.dataToCell(data) : undefined;
+        const replacing = new Set(op.cells.filter((p) => !p.styleOnly).map((p) => cellKey(p.row, p.col)));
+        for (const patch of op.cells) {
+          const parent = sheet.getCell(patch.row, patch.col)?.spillParent;
+          if (parent !== undefined && !patch.styleOnly && !replacing.has(parent)) throw new Error('Cannot change part of a spilled array. Edit its formula anchor instead.');
+        }
+        const prev = op.cells.map(({ row, col, data, styleOnly }) => {
+          const existing = sheet.getCell(row, col);
+          const before = existing?.spillParent !== undefined ? (existing.style ? { s: existing.style } : null) : Sheet.cellToData(existing);
+          const cell: Cell | undefined = styleOnly
+            ? { ...(existing ?? { value: null }), style: data?.s }
+            : data ? Sheet.dataToCell(data) : undefined;
           sheet.putCell(row, col, cell);
           this.calc.update(sheet, row, col, cell?.formula);
           tx.changed.add(gid(sheet.id, row, col));
-          return { row, col, data: before };
+          return { row, col, data: before, styleOnly };
         });
-        return [{ type: 'setCells', sheet: sheet.name, cells: prev }];
+        return [{ type: 'setCells', sheet: sheet.name, cells: prev, ...(op.reordersCells ? { reordersCells: true } : {}) }];
       }
       case 'insertRows':
       case 'insertCols': {
@@ -265,6 +292,7 @@ export class Workbook {
         const snapshot = this.toJSON();
         const index = this.sheets.indexOf(sheet);
         this.sheets.splice(index, 1);
+        this.pivotTables = this.pivotTables.filter((p) => p.source.sheet.toUpperCase() !== sheet.name.toUpperCase() && p.target.sheet.toUpperCase() !== sheet.name.toUpperCase());
         this.rewriteAllRefs((f) => invalidateSheetRefs(f, sheet.name));
         if (this.activeSheetIndex >= this.sheets.length || this.activeSheetIndex > index) this.activeSheetIndex = Math.max(0, this.activeSheetIndex - 1);
         tx.structural = true;
@@ -278,6 +306,10 @@ export class Workbook {
         if (existing && existing !== sheet) throw new Error(`Sheet already exists: ${to}`);
         const from = sheet.name;
         sheet.name = to;
+        for (const pivot of this.pivotTables) {
+          if (pivot.source.sheet.toUpperCase() === from.toUpperCase()) pivot.source.sheet = to;
+          if (pivot.target.sheet.toUpperCase() === from.toUpperCase()) pivot.target.sheet = to;
+        }
         this.rewriteAllRefs((f) => renameSheetInFormula(f, from, to));
         tx.structural = true;
         return [{ type: 'renameSheet', from: to, to: from }];
@@ -308,6 +340,7 @@ export class Workbook {
         const sheet = this.requireSheet(op.sheet);
         const prev = sheet.merges.map((m) => formatRange(m));
         sheet.merges = op.merges.map((m) => parseRange(m)?.range).filter((r): r is RangeAddress => !!r);
+        tx.structural = true;
         return [{ type: 'setMerges', sheet: sheet.name, merges: prev }];
       }
       case 'setFrozen': {
@@ -322,6 +355,31 @@ export class Workbook {
         sheet.charts = structuredClone(op.charts);
         return [{ type: 'setCharts', sheet: sheet.name, charts: prev }];
       }
+      case 'setConditionalFormats': {
+        validateConditionalFormats(op.rules);
+        const sheet = this.requireSheet(op.sheet);
+        const prev = structuredClone(sheet.conditionalFormats);
+        sheet.conditionalFormats = structuredClone(op.rules);
+        return [{ type: 'setConditionalFormats', sheet: sheet.name, rules: prev }];
+      }
+      case 'setPivotTables': {
+        const ids = new Set<string>();
+        for (const table of op.tables) {
+          if (!table.id || ids.has(table.id)) throw new Error('Pivot IDs must be nonempty and unique');
+          ids.add(table.id);
+        }
+        const prev = structuredClone(this.pivotTables);
+        this.pivotTables = structuredClone(op.tables);
+        return [{ type: 'setPivotTables', tables: prev }];
+      }
+      case 'setTables': {
+        const sheet = this.requireSheet(op.sheet);
+        validateTables(this, sheet, op.tables);
+        const previous = structuredClone(sheet.tables);
+        sheet.tables = structuredClone(op.tables);
+        sheet.invalidate();
+        return [{ type: 'setTables', sheet: sheet.name, tables: previous }];
+      }
       case 'setName': {
         const key = op.name.toUpperCase();
         const prev = this.names.get(key)?.ref ?? null;
@@ -334,6 +392,7 @@ export class Workbook {
         const snapshot = this.toJSON();
         const active = this.activeSheetIndex;
         this.sheets = op.data.sheets.map((s) => Sheet.fromJSON(s));
+        this.pivotTables = structuredClone(op.data.pivotTables ?? []);
         this.names.clear();
         for (const [name, ref] of Object.entries(op.data.names ?? {})) this.names.set(name.toUpperCase(), { name, ref });
         this.activeSheetIndex = Math.min(active, this.sheets.length - 1);
@@ -350,14 +409,48 @@ export class Workbook {
         if (cell.formula !== undefined) cell.formula = fn(cell.formula, sheet.name);
       }
       for (const chart of sheet.charts) rewriteChartRefs(chart, (ref) => fn(ref, sheet.name));
+      for (const rule of sheet.conditionalFormats) {
+        if (rule.type !== 'colorScale') rule.formulas = rule.formulas.map((f) => fn(f, sheet.name));
+      }
     }
     for (const n of this.names.values()) n.ref = fn(n.ref, this.sheets[0]?.name ?? '');
   }
 
   private structuralChange(change: StructuralChange): void {
+    this.calc.clearSpills();
     const sheet = this.requireSheet(change.sheet);
     const isRow = change.axis === 'row';
     const { index, count } = change;
+    sheet.tables = sheet.tables.flatMap((table) => {
+      const range = adjustFormulaForStructure(table.range, sheet.name, change);
+      if (range === '#REF!') return [];
+      const previous = parseRange(table.range)!.range;
+      const headerDeleted = isRow && count < 0 && previous.start.row >= index && previous.start.row < index - count;
+      const updated = { ...table, range, headerRow: table.headerRow && !headerDeleted };
+      if (headerDeleted) delete updated.filters;
+      else if (!isRow && table.filters) {
+        const start = parseRange(range)!.range.start.col;
+        updated.filters = table.filters.flatMap((f) => {
+          const col = previous.start.col + f.column;
+          if (count < 0 && col >= index && col < index - count) return [];
+          const moved = col >= index ? col + count : col;
+          return [{ ...f, column: moved - start }];
+        });
+      }
+      return [updated];
+    });
+    this.pivotTables = this.pivotTables.flatMap((pivot) => {
+      const updated = adjustPivotForStructure(this, pivot, change);
+      return updated ? [updated] : [];
+    });
+    sheet.conditionalFormats = sheet.conditionalFormats.flatMap((rule) => {
+      const ref = adjustFormulaForStructure(rule.range, sheet.name, change);
+      if (ref === '#REF!') return [];
+      const range = parseRange(rule.range)!.range;
+      const key = isRow ? 'row' : 'col';
+      const offset = count < 0 && range.start[key] >= index && range.start[key] < index - count ? index - count - range.start[key] : 0;
+      return [{ ...rule, range: ref, ...(rule.type !== 'colorScale' && offset ? { formulas: rule.formulas.map((f) => shiftFormula(f, isRow ? offset : 0, isRow ? 0 : offset)) } : {}) }];
+    });
     const limit = isRow ? MAX_ROWS : MAX_COLS;
     const move = (pos: number): number | null => {
       if (count > 0) return pos >= index ? (pos + count < limit ? pos + count : null) : pos;
@@ -420,6 +513,10 @@ export class Workbook {
 
   getValue(sheet: string | number, row: number, col: number): Scalar {
     return this.requireSheet(sheet).getValue(row, col);
+  }
+
+  getCellStyle(sheet: string | number, row: number, col: number): CellStyle | undefined {
+    return new ConditionalFormatEvaluator(this).style(this.requireSheet(sheet), row, col);
   }
 
   getChart(id: string): { sheet: Sheet; chart: ChartSpec } | undefined {

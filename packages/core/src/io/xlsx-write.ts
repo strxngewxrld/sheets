@@ -1,13 +1,15 @@
 import { strToU8, zipSync } from 'fflate';
-import { formatAddress, formatRange, keyToAddress, quoteSheetName } from '../address.js';
+import { formatAddress, formatRange, keyToAddress, parseRange, quoteSheetName } from '../address.js';
 import type { ChartSeries, ChartSpec } from '../chart.js';
 import { addFutureFunctionPrefixes } from '../formula/rewrite.js';
 import type { Sheet } from '../sheet.js';
 import { styleKey, type BorderSide, type CellStyle } from '../style.js';
 import { isError } from '../values.js';
-import type { Workbook } from '../workbook.js';
+import { Workbook } from '../workbook.js';
+import { tableCellStyle, tableColumnNames, tableFilteredRows, type TableTheme } from '../table.js';
 import { toArgb } from './colors.js';
-import { escapeXml } from './xml.js';
+import { encodeOoxmlEscapes, escapeXml } from './xml.js';
+import { preserveXlsx } from './xlsx-preserve.js';
 
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -41,6 +43,9 @@ class StyleWriter {
   private numFmts = new Map<string, number>();
   private xfs: string[] = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'];
   private xfIdx = new Map<string, number>();
+  private dxfs: string[] = [];
+  private dxfIdx = new Map<string, number>();
+  private tableStyles: string[] = [];
 
   constructor() {
     this.font({});
@@ -107,10 +112,10 @@ class StyleWriter {
     const align: string[] = [];
     if (style.hAlign) align.push(`horizontal="${style.hAlign}"`);
     if (style.vAlign) align.push(`vertical="${style.vAlign === 'middle' ? 'center' : style.vAlign}"`);
-    if (style.wrap) align.push('wrapText="1"');
+    if (style.wrap !== undefined) align.push(`wrapText="${style.wrap ? 1 : 0}"`);
     let xml = `<xf numFmtId="${numFmtId}" fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"`;
     if (numFmtId) xml += ' applyNumberFormat="1"';
-    if (fontId) xml += ' applyFont="1"';
+    if (fontId || ['bold', 'italic', 'underline', 'strike', 'fontName', 'fontSize', 'color'].some((k) => style[k as keyof CellStyle] !== undefined)) xml += ' applyFont="1"';
     if (fillId) xml += ' applyFill="1"';
     if (borderId) xml += ' applyBorder="1"';
     xml += align.length ? ` applyAlignment="1"><alignment ${align.join(' ')}/></xf>` : '/>';
@@ -118,6 +123,33 @@ class StyleWriter {
     this.xfs.push(xml);
     this.xfIdx.set(key, idx);
     return idx;
+  }
+
+  differential(style: CellStyle): number {
+    let xml = '<dxf>';
+    const font: string[] = [];
+    for (const [key, tag] of [['bold', 'b'], ['italic', 'i'], ['underline', 'u'], ['strike', 'strike']] as const) {
+      if (style[key] !== undefined) font.push(style[key] ? `<${tag}/>` : `<${tag} val="${key === 'underline' ? 'none' : '0'}"/>`);
+    }
+    if (style.fontSize !== undefined) font.push(`<sz val="${style.fontSize}"/>`);
+    if (style.fontName) font.push(`<name val="${escapeXml(style.fontName)}"/>`);
+    if (style.color) font.push(`<color rgb="${toArgb(style.color)}"/>`);
+    if (font.length) xml += `<font>${font.join('')}</font>`;
+    if (style.numFmt) xml += `<numFmt numFmtId="${this.numFmt(style.numFmt)}" formatCode="${escapeXml(style.numFmt)}"/>`;
+    if (style.fill) xml += this.fills[this.fill(style.fill)];
+    if (style.hAlign || style.vAlign || style.wrap !== undefined) xml += `<alignment${style.hAlign ? ` horizontal="${style.hAlign}"` : ''}${style.vAlign ? ` vertical="${style.vAlign === 'middle' ? 'center' : style.vAlign}"` : ''}${style.wrap !== undefined ? ` wrapText="${style.wrap ? 1 : 0}"` : ''}/>`;
+    if (style.border) xml += this.borders[this.border(style.border)];
+    xml += '</dxf>';
+    return this.intern(this.dxfs, this.dxfIdx, xml);
+  }
+
+  tableStyle(name: string, theme: TableTheme): void {
+    const elements = [
+      `<tableStyleElement type="wholeTable" dxfId="${this.differential(theme.body)}"/>`,
+      `<tableStyleElement type="headerRow" dxfId="${this.differential(theme.header)}"/>`,
+      `<tableStyleElement type="firstRowStripe" size="1" dxfId="${this.differential(theme.stripe)}"/>`,
+    ];
+    this.tableStyles.push(`<tableStyle name="${name}" pivot="0" table="1" count="3">${elements.join('')}</tableStyle>`);
   }
 
   xml(): string {
@@ -134,7 +166,7 @@ class StyleWriter {
       '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
       `<cellXfs count="${this.xfs.length}">${this.xfs.join('')}</cellXfs>` +
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
-      '<dxfs count="0"/><tableStyles count="0"/>' +
+      `<dxfs count="${this.dxfs.length}">${this.dxfs.join('')}</dxfs><tableStyles count="${this.tableStyles.length}">${this.tableStyles.join('')}</tableStyles>` +
       '</styleSheet>'
     );
   }
@@ -155,12 +187,12 @@ class SharedStrings {
     return i;
   }
   xml(): string {
-    const items = this.list.map((s) => `<si><t${/^\s|\s$|\n/.test(s) ? ' xml:space="preserve"' : ''}>${escapeXml(s)}</t></si>`).join('');
+    const items = this.list.map((s) => `<si><t${/^\s|\s$|\n/.test(s) ? ' xml:space="preserve"' : ''}>${escapeXml(encodeOoxmlEscapes(s))}</t></si>`).join('');
     return XML_HEAD + `<sst xmlns="${NS_MAIN}" count="${this.count}" uniqueCount="${this.list.length}">${items}</sst>`;
   }
 }
 
-function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isActive: boolean, drawingRelId: string | null): string {
+function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isActive: boolean, drawingRelId: string | null, tableRelIds: string[] = []): string {
   const used = sheet.usedRange();
   const parts: string[] = [XML_HEAD, `<worksheet xmlns="${NS_MAIN}" xmlns:r="${NS_R}">`];
   parts.push(`<dimension ref="${used ? formatRange(used) : 'A1'}"/>`);
@@ -208,21 +240,28 @@ function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isA
   }
   for (const r of sheet.rowHeights.keys()) if (!rows.has(r)) rows.set(r, []);
   parts.push('<sheetData>');
+  const filteredRows = tableFilteredRows(sheet);
   for (const r of [...rows.keys()].sort((a, b) => a - b)) {
     const h = sheet.rowHeights.get(r);
-    const rowAttrs = h === undefined ? '' : h === 0 ? ' hidden="1"' : ` ht="${pxToPoints(h)}" customHeight="1"`;
+    const rowAttrs = (h === 0 || filteredRows.has(r) ? ' hidden="1"' : '') + (h !== undefined ? ` ht="${pxToPoints(h)}" customHeight="1"` : '');
     parts.push(`<row r="${r + 1}"${rowAttrs}>`);
     for (const key of rows.get(r)!.sort((a, b) => a - b)) {
       const cell = sheet.cells.get(key)!;
       const { col } = keyToAddress(key);
       const ref = formatAddress(r, col);
-      const s = styles.get(cell.style);
-      const sAttr = s ? ` s="${s}"` : '';
+      let cellStyle = cell.style;
+      const fontKeys = ['bold', 'italic', 'underline', 'strike', 'fontName', 'fontSize', 'color'] as const;
+      if (cellStyle && fontKeys.some((key) => cellStyle![key] !== undefined)) {
+        const inherited = tableCellStyle(sheet, r, col);
+        if (inherited) cellStyle = { ...Object.fromEntries(fontKeys.filter((key) => inherited[key] !== undefined).map((key) => [key, inherited[key]])), ...cellStyle };
+      }
+      const s = styles.get(cellStyle);
+      const sAttr = (s ? ` s="${s}"` : '') + (cell.spillRange ? ' cm="1"' : '');
       const v = cell.value;
       if (cell.formula !== undefined) {
-        const f = `<f>${escapeXml(addFutureFunctionPrefixes(cell.formula))}</f>`;
+        const f = `<f${cell.spillRange ? ` t="array" ref="${formatRange(cell.spillRange)}"` : ''}>${escapeXml(addFutureFunctionPrefixes(cell.formula))}</f>`;
         if (typeof v === 'number') parts.push(`<c r="${ref}"${sAttr}>${f}<v>${v}</v></c>`);
-        else if (typeof v === 'string') parts.push(`<c r="${ref}"${sAttr} t="str">${f}<v>${escapeXml(v)}</v></c>`);
+        else if (typeof v === 'string') parts.push(`<c r="${ref}"${sAttr} t="str">${f}<v>${escapeXml(encodeOoxmlEscapes(v))}</v></c>`);
         else if (typeof v === 'boolean') parts.push(`<c r="${ref}"${sAttr} t="b">${f}<v>${v ? 1 : 0}</v></c>`);
         else if (isError(v) && !['#CIRC!', '#SPILL!', '#CALC!'].includes(v.code)) parts.push(`<c r="${ref}"${sAttr} t="e">${f}<v>${v.code}</v></c>`);
         else parts.push(`<c r="${ref}"${sAttr}>${f}</c>`);
@@ -239,8 +278,19 @@ function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isA
   if (sheet.merges.length) {
     parts.push(`<mergeCells count="${sheet.merges.length}">${sheet.merges.map((m) => `<mergeCell ref="${formatRange(m)}"/>`).join('')}</mergeCells>`);
   }
+  sheet.conditionalFormats.forEach((rule, i) => {
+    const attrs = `type="${rule.type}" priority="${i + 1}"${rule.stopIfTrue ? ' stopIfTrue="1"' : ''}`;
+    let content: string;
+    if (rule.type === 'colorScale') {
+      content = `<cfRule ${attrs}><colorScale><cfvo type="min"/>${rule.colors.length === 3 ? '<cfvo type="percent" val="50"/>' : ''}<cfvo type="max"/>${rule.colors.map((c) => `<color rgb="${toArgb(c)}"/>`).join('')}</colorScale></cfRule>`;
+    } else {
+      content = `<cfRule ${attrs} dxfId="${styles.differential(rule.style)}"${rule.type === 'cellIs' ? ` operator="${rule.operator}"` : ''}>${rule.formulas.map((f) => `<formula>${escapeXml(addFutureFunctionPrefixes(f.replace(/^=/, '')))}</formula>`).join('')}</cfRule>`;
+    }
+    parts.push(`<conditionalFormatting sqref="${escapeXml(rule.range)}">${content}</conditionalFormatting>`);
+  });
   parts.push('<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
   if (drawingRelId) parts.push(`<drawing r:id="${drawingRelId}"/>`);
+  if (tableRelIds.length) parts.push(`<tableParts count="${tableRelIds.length}">${tableRelIds.map((id) => `<tablePart r:id="${id}"/>`).join('')}</tableParts>`);
   parts.push('</worksheet>');
   return parts.join('');
 }
@@ -377,6 +427,16 @@ export interface XlsxWriteOptions {
 }
 
 export function writeXlsx(wb: Workbook, options: XlsxWriteOptions = {}): Uint8Array {
+  if (wb.xlsxSource) return preserveXlsx(wb, options.compression ?? 6, (data) => {
+    if (!data) return writeFreshXlsx(wb, options);
+    const baseline = new Workbook({ empty: true });
+    baseline.load(data, { recalculate: false });
+    return writeFreshXlsx(baseline, options);
+  });
+  return writeFreshXlsx(wb, options);
+}
+
+function writeFreshXlsx(wb: Workbook, options: XlsxWriteOptions): Uint8Array {
   const files: Record<string, Uint8Array> = {};
   const put = (path: string, xml: string) => (files[path] = strToU8(xml));
   const styles = new StyleWriter();
@@ -385,8 +445,11 @@ export function writeXlsx(wb: Workbook, options: XlsxWriteOptions = {}): Uint8Ar
   const wbRels: { id: string; type: string; target: string }[] = [];
   let chartNo = 0;
   let drawingNo = 0;
+  let tableNo = 0;
 
   wb.sheets.forEach((sheet, i) => {
+    const sheetRels: { id: string; type: string; target: string }[] = [];
+    const tableRelIds: string[] = [];
     const sheetPath = `xl/worksheets/sheet${i + 1}.xml`;
     let drawingRelId: string | null = null;
     if (sheet.charts.length) {
@@ -404,10 +467,27 @@ export function writeXlsx(wb: Workbook, options: XlsxWriteOptions = {}): Uint8Ar
       });
       put(drawingPath, drawingXml(entries));
       put(`xl/drawings/_rels/drawing${drawingNo}.xml.rels`, relsXml(chartRels));
-      put(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, relsXml([{ id: 'rId1', type: `${REL}/drawing`, target: `../drawings/drawing${drawingNo}.xml` }]));
+      sheetRels.push({ id: 'rId1', type: `${REL}/drawing`, target: `../drawings/drawing${drawingNo}.xml` });
       overrides.push(`<Override PartName="/${drawingPath}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`);
     }
-    put(sheetPath, sheetXml(sheet, styles, strings, i === wb.activeSheetIndex, drawingRelId));
+    for (const table of sheet.tables) {
+      tableNo++;
+      const relId = `rIdTable${tableNo}`;
+      const styleName = `SheetsTableStyle${tableNo}`;
+      styles.tableStyle(styleName, table.theme);
+      tableRelIds.push(relId);
+      sheetRels.push({ id: relId, type: `${REL}/table`, target: `../tables/table${tableNo}.xml` });
+      const columns = tableColumnNames(sheet, table);
+      const range = parseRange(table.range)!.range;
+      put(`xl/tables/table${tableNo}.xml`, XML_HEAD +
+        `<table xmlns="${NS_MAIN}" id="${tableNo}" name="${escapeXml(table.name)}" displayName="${escapeXml(table.name)}" ref="${formatRange(range)}" headerRowCount="${table.headerRow ? 1 : 0}" totalsRowShown="0">` +
+        (table.headerRow ? `<autoFilter ref="${formatRange(range)}">${(table.filters ?? []).map((f) => `<filterColumn colId="${f.column}"><filters${f.values.includes('') ? ' blank="1"' : ''}>${f.values.filter((v) => v !== '').map((v) => `<filter val="${escapeXml(v)}"/>`).join('')}</filters></filterColumn>`).join('')}</autoFilter>` : '') +
+        `<tableColumns count="${columns.length}">${columns.map((name, index) => `<tableColumn id="${index + 1}" name="${escapeXml(name)}"/>`).join('')}</tableColumns>` +
+        `<tableStyleInfo name="${styleName}" showFirstColumn="0" showLastColumn="0" showRowStripes="${table.bandedRows ? 1 : 0}" showColumnStripes="0"/></table>`);
+      overrides.push(`<Override PartName="/xl/tables/table${tableNo}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>`);
+    }
+    if (sheetRels.length) put(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, relsXml(sheetRels));
+    put(sheetPath, sheetXml(sheet, styles, strings, i === wb.activeSheetIndex, drawingRelId, tableRelIds));
     overrides.push(`<Override PartName="/${sheetPath}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`);
     wbRels.push({ id: `rId${i + 1}`, type: `${REL}/worksheet`, target: `worksheets/sheet${i + 1}.xml` });
   });
@@ -415,6 +495,18 @@ export function writeXlsx(wb: Workbook, options: XlsxWriteOptions = {}): Uint8Ar
   const n = wb.sheets.length;
   wbRels.push({ id: `rId${n + 1}`, type: `${REL}/styles`, target: 'styles.xml' });
   wbRels.push({ id: `rId${n + 2}`, type: `${REL}/sharedStrings`, target: 'sharedStrings.xml' });
+  if (wb.pivotTables.length) {
+    wbRels.push({ id: 'rIdSheetsPivots', type: `${REL}/customXml`, target: '../customXml/sheets-pivots.xml' });
+    put('customXml/sheets-pivots.xml', XML_HEAD + `<sheetsPivots xmlns="urn:sheets:pivots:v1" version="1"><json>${escapeXml(JSON.stringify(wb.pivotTables))}</json></sheetsPivots>`);
+  }
+  if (wb.sheets.some((s) => [...s.cells.values()].some((c) => c.spillRange))) {
+    wbRels.push({ id: `rId${n + 3}`, type: `${REL}/sheetMetadata`, target: 'metadata.xml' });
+    overrides.push('<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>');
+    put('xl/metadata.xml', XML_HEAD + `<metadata xmlns="${NS_MAIN}" xmlns:xda="http://schemas.microsoft.com/office/spreadsheetml/2017/dynamicarray">` +
+      '<metadataTypes count="1"><metadataType name="XLDAPR" minSupportedVersion="120000" copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" clearComments="1" assign="1" coerce="1" cellMeta="1"/></metadataTypes>' +
+      '<futureMetadata name="XLDAPR" count="1"><bk><extLst><ext uri="{bdbb8cdc-fa1e-496e-a857-3c3f30c029c3}"><xda:dynamicArrayProperties fDynamic="1" fCollapsed="0"/></ext></extLst></bk></futureMetadata>' +
+      '<cellMetadata count="1"><bk><rc t="1" v="0"/></bk></cellMetadata></metadata>');
+  }
 
   const sheetsXml = wb.sheets.map((s, i) => `<sheet name="${escapeXml(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('');
   const names = [...wb.names.values()];

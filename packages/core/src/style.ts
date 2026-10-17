@@ -46,7 +46,7 @@ export const STYLE_KEYS: readonly (keyof CellStyle)[] = [
 export function applyStylePatch(base: CellStyle | undefined, patch: StylePatch): CellStyle | undefined {
   const out: Record<string, unknown> = { ...(base ?? {}) };
   for (const [k, v] of Object.entries(patch)) {
-    if (v === null || v === undefined || v === false || v === '') delete out[k];
+    if (v === null || v === undefined || v === '') delete out[k];
     else out[k] = v;
   }
   return Object.keys(out).length ? (out as CellStyle) : undefined;

@@ -1,0 +1,13 @@
+**
+!package.json
+!package.nls.json
+!package.nls.de.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!dist/extension.js
+!dist/webview.js
+!media/icon.png
+!media/preview.png
+!docs/xlsx-compatibility.md
