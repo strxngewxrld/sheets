@@ -181,6 +181,7 @@ export class SpreadsheetView {
   private alertOpen = false;
   private validationButton!: HTMLButtonElement;
   private noteEl!: HTMLDivElement;
+  private noticeEl!: HTMLDivElement;
   private skipValidation = false;
 
   constructor(container: HTMLElement, workbook: Workbook, options: SpreadsheetViewOptions = {}) {
@@ -292,6 +293,24 @@ export class SpreadsheetView {
   private goTo(text: string): void {
     const named = this.wb.names.get(text.trim().toUpperCase());
     this.select(named ? named.ref : text.trim());
+  }
+
+  /**
+   * Shows a warning above the grid, e.g. that the current changes cannot be
+   * saved without loss (`detail` is the technical reason); null hides it.
+   */
+  setNotice(detail: string | null): void {
+    if (!detail) {
+      this.noticeEl.hidden = true;
+      return;
+    }
+    const strong = document.createElement('strong');
+    strong.textContent = `⚠ ${this.strings.saveBlocked}`;
+    const reason = document.createElement('span');
+    reason.textContent = detail;
+    this.noticeEl.replaceChildren(strong, reason);
+    this.noticeEl.hidden = false;
+    this.scheduleRender(true);
   }
 
   /** Runs a host command such as find or replace. */
@@ -429,6 +448,12 @@ export class SpreadsheetView {
       this.root.appendChild(bar);
       this.bindFormulaBar();
     }
+
+    this.noticeEl = document.createElement('div');
+    this.noticeEl.className = 'sx-notice';
+    this.noticeEl.setAttribute('role', 'status');
+    this.noticeEl.hidden = true;
+    this.root.appendChild(this.noticeEl);
 
     this.gridEl = document.createElement('div');
     this.gridEl.className = 'sx-grid';

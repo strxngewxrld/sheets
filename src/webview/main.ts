@@ -28,10 +28,33 @@ function post(msg: WebviewToHost): void {
   vscode.postMessage(msg);
 }
 
+let saveCheck: ReturnType<typeof setTimeout> | undefined;
+
+/** Warns in the editor when the current changes would be refused on XLSX save. */
+function scheduleSaveCheck(wb: Workbook): void {
+  clearTimeout(saveCheck);
+  if (formatFromFileName(fileName) !== 'xlsx' || !wb.xlsxSource) {
+    view?.setNotice(null);
+    return;
+  }
+  saveCheck = setTimeout(() => {
+    if (view?.workbook !== wb) return;
+    try {
+      saveWorkbook(wb, 'xlsx');
+      view.setNotice(null);
+    } catch (e) {
+      const message = (e as Error).message;
+      view.setNotice(message.startsWith('XLSX-Schutz:') ? message.replace(/^XLSX-Schutz:\s*/, '').replace(/\s*Diese Änderung kann noch nicht.*$/s, '') : message);
+    }
+  }, 600);
+}
+
 function attach(wb: Workbook): void {
   offChange?.();
+  scheduleSaveCheck(wb);
   // Report edits to VS Code so it tracks dirty state and routes undo/redo to us.
   offChange = wb.events.on('change', (e) => {
+    scheduleSaveCheck(wb);
     if (e.origin === 'undo' || e.origin === 'redo') return;
     post({ type: 'edit', label: e.origin === 'agent' ? 'Agent edit' : 'Edit' });
   });

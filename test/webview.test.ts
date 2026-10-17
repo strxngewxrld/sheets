@@ -8,6 +8,7 @@ const bridge = vi.hoisted(() => ({
   post: vi.fn(),
   commands: [] as string[],
   options: undefined as undefined | { onOpenLink?: (url: string) => void },
+  notices: [] as (string | null)[],
   receive: undefined as ((event: { data: HostToWebview }) => void) | undefined,
 }));
 
@@ -20,6 +21,7 @@ vi.mock('@sheets/ui', () => ({
     setWorkbook(wb: Workbook) { this.workbook = wb; }
     focus() {}
     runCommand(command: string) { bridge.commands.push(command); }
+    setNotice(text: string | null) { bridge.notices.push(text); }
   },
 }));
 
@@ -38,6 +40,7 @@ beforeEach(async () => {
   vi.resetModules();
   bridge.post.mockClear();
   bridge.commands.length = 0;
+  bridge.notices.length = 0;
   bridge.receive = undefined;
   vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage: bridge.post }));
   vi.stubGlobal('document', { getElementById: () => ({}) });
@@ -59,6 +62,39 @@ describe('VS Code webview commands', () => {
     send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: false });
     bridge.options!.onOpenLink!('https://example.com');
     expect(bridge.post).toHaveBeenCalledWith({ type: 'openLink', url: 'https://example.com' });
+  });
+});
+
+describe('VS Code webview save warnings and CSV export', () => {
+  it('warns while changes would be refused on save and clears the warning after undo', () => {
+    vi.useFakeTimers();
+    try {
+      const wb = new Workbook();
+      setValues(wb, 0, 0, 0, [['Name', 'Value'], ['A', 1]]);
+      const parts = unzipSync(saveWorkbook(wb, 'xlsx'));
+      parts['customXml/unimplemented.xml'] = strToU8('<preserve/>');
+      send({ type: 'init', bytes: encodeBytes(zipSync(parts)), fileName: 'complex.xlsx', language: 'de', readOnly: false });
+      vi.advanceTimersByTime(1000);
+      expect(bridge.notices.at(-1)).toBe(null);
+      send({ type: 'request', id: 1, method: 'executeTool', params: { name: 'format_table', input: { range: 'A1:B2' } } });
+      vi.advanceTimersByTime(1000);
+      expect(bridge.notices.at(-1)).toMatch(/^Struktur-, Tabellen-/);
+      send({ type: 'undo' });
+      vi.advanceTimersByTime(1000);
+      expect(bridge.notices.at(-1)).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('exports the active sheet as CSV', () => {
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [['Name', 'Value'], ['A', 1.5]]);
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(wb, 'xlsx')), fileName: 'data.xlsx', language: 'de', readOnly: false });
+    send({ type: 'request', id: 7, method: 'exportCsv', params: { delimiter: ';' } });
+    const result = response(7).result as { sheet: string; bytes: string };
+    expect(result.sheet).toBe('Sheet1');
+    expect(new TextDecoder().decode(decodeBytes(result.bytes))).toBe('Name;Value\r\nA;1,5\r\n');
   });
 });
 
