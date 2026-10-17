@@ -1,7 +1,7 @@
 import { formatValue, parseNumber } from '../../numfmt.js';
-import { Err, isError } from '../../values.js';
-import { broadcast, deref, toText } from '../evaluator.js';
-import type { FunctionDef } from '../registry.js';
+import { CellError, Err, isError, type Scalar } from '../../values.js';
+import { broadcast, deref, toMatrix, toText, type EvalContext, type EvalValue, type Matrix } from '../evaluator.js';
+import type { EagerFunctionDef, FunctionDef } from '../registry.js';
 import { boolArg, def, numArg, scalarArg, scalarsOf, textArg, wildcardToRegExp } from './helpers.js';
 
 /** Text function of one argument, broadcast over arrays. */
@@ -15,7 +15,92 @@ function text1(name: string, description: string, f: (s: string) => string | num
   );
 }
 
+/** Delimiters given as text or an array of texts; empty strings are dropped. */
+function delimiters(v: EvalValue | undefined, ctx: EvalContext): string[] {
+  if (v === undefined) return [];
+  const out: string[] = [];
+  for (const row of toMatrix(v, ctx)) for (const d of row) {
+    const s = toText(d);
+    if (isError(s)) throw s;
+    if (s !== '') out.push(s);
+  }
+  return out;
+}
+
+/** Splits text at any of the delimiters (longest match first). */
+function splitAll(text: string, delims: string[], ignoreCase: boolean): string[] {
+  if (!delims.length) return [text];
+  const sorted = [...delims].sort((a, b) => b.length - a.length);
+  const hay = ignoreCase ? text.toLowerCase() : text;
+  const needles = ignoreCase ? sorted.map((d) => d.toLowerCase()) : sorted;
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length;) {
+    const k = needles.findIndex((d) => hay.startsWith(d, i));
+    if (k < 0) { i++; continue; }
+    parts.push(text.slice(start, i));
+    i += needles[k]!.length;
+    start = i;
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** Finds the position of the n-th delimiter occurrence for TEXTBEFORE/TEXTAFTER. */
+function locate(text: string, delims: string[], instance: number, ignoreCase: boolean, matchEnd: boolean): { start: number; end: number } | null {
+  const hay = ignoreCase ? text.toLowerCase() : text;
+  const needles = (ignoreCase ? delims.map((d) => d.toLowerCase()) : delims);
+  const hits: { start: number; end: number }[] = [];
+  if (!needles.length) hits.push({ start: 0, end: 0 }, { start: text.length, end: text.length });
+  for (let i = 0; i < text.length && needles.length;) {
+    const k = needles.findIndex((d) => hay.startsWith(d, i));
+    if (k < 0) { i++; continue; }
+    hits.push({ start: i, end: i + needles[k]!.length });
+    i += needles[k]!.length;
+  }
+  if (matchEnd && needles.length) {
+    if (instance > 0) hits.push({ start: text.length, end: text.length });
+    else hits.unshift({ start: 0, end: 0 });
+  }
+  const hit = instance > 0 ? hits[instance - 1] : hits[hits.length + instance];
+  return hit ?? null;
+}
+
+function textAround(before: boolean): EagerFunctionDef['impl'] {
+  return ([t, d, n, mode, end, fallback], ctx) => {
+    const delims = delimiters(d, ctx);
+    const instance = Math.trunc(numArg(n, ctx, 1));
+    const ignoreCase = numArg(mode, ctx, 0) === 1;
+    const matchEnd = boolArg(end, ctx);
+    if (instance === 0) return Err.VALUE;
+    return broadcast([deref(t!, ctx)], (v) => {
+      const text = toText(v);
+      if (isError(text)) return text;
+      if (Math.abs(instance) > text.length && text.length > 0) return Err.VALUE;
+      const hit = locate(text, delims, instance, ignoreCase, matchEnd);
+      if (!hit) return fallback === undefined ? Err.NA : (deref(fallback, ctx) as Scalar);
+      return before ? text.slice(0, hit.start) : text.slice(hit.end);
+    });
+  };
+}
+
 export const textFunctions: FunctionDef[] = [
+  def('TEXTSPLIT', 'text', 'TEXTSPLIT(text, col_delimiter, [row_delimiter], [ignore_empty], [match_mode], [pad_with])', 'Splits text into columns and rows at the given delimiters.', ([t, cd, rd, ie, mode, pad], ctx) => {
+    const text = textArg(t, ctx);
+    const colDelims = delimiters(cd, ctx);
+    const rowDelims = delimiters(rd, ctx);
+    if (!colDelims.length && !rowDelims.length) return Err.VALUE;
+    const ignoreEmpty = boolArg(ie, ctx);
+    const ignoreCase = numArg(mode, ctx, 0) === 1;
+    const padWith: Scalar = pad === undefined ? Err.NA : (deref(pad, ctx) as Scalar);
+    const keep = (parts: string[]) => (ignoreEmpty ? parts.filter((p) => p !== '') : parts);
+    const rows = keep(splitAll(text, rowDelims, ignoreCase)).map((line) => keep(splitAll(line, colDelims, ignoreCase)));
+    const cols = Math.max(0, ...rows.map((r) => r.length));
+    if (!rows.length || !cols) return new CellError('#CALC!', 'Empty array');
+    return rows.map((r) => Array.from({ length: cols }, (_, c) => (c < r.length ? r[c]! : padWith))) as Matrix;
+  }, { minArgs: 2, maxArgs: 6 }),
+  def('TEXTBEFORE', 'text', 'TEXTBEFORE(text, delimiter, [instance_num], [match_mode], [match_end], [if_not_found])', 'Returns the text before a delimiter.', textAround(true), { minArgs: 2, maxArgs: 6 }),
+  def('TEXTAFTER', 'text', 'TEXTAFTER(text, delimiter, [instance_num], [match_mode], [match_end], [if_not_found])', 'Returns the text after a delimiter.', textAround(false), { minArgs: 2, maxArgs: 6 }),
   def('CONCATENATE', 'text', 'CONCATENATE(text1, [text2], ...)', 'Joins text values.', (args, ctx) => args.map((a) => textArg(a, ctx)).join(''), { minArgs: 1 }),
   def('CONCAT', 'text', 'CONCAT(text1, [text2], ...)', 'Joins text values and ranges.', (args, ctx) => {
     let out = '';
