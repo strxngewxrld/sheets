@@ -1,7 +1,7 @@
 import { normalizeRange, singleCellRange, type RangeAddress } from '../address.js';
 import { formatGeneral } from '../numfmt.js';
 import { CellError, Err, isError, type Scalar } from '../values.js';
-import type { Node } from './ast.js';
+import type { Node, StructuredRef } from './ast.js';
 import { getFunction } from './registry.js';
 
 export type Matrix = Scalar[][];
@@ -30,6 +30,8 @@ export interface EvalContext {
   /** Parses a reference string (for INDIRECT). */
   parseRef?(ref: string): Node | undefined;
   getSpillRange?(sheet: string, row: number, col: number): RangeAddress | CellError;
+  /** Resolves a structured table reference for the formula cell. */
+  resolveStructured?(ref: StructuredRef, sheet: string, row: number, col: number): RefValue | CellError;
   /** Why a row is hidden: by a table filter, manually (height 0), or not at all. */
   rowHidden?(sheet: string, row: number): 'filtered' | 'manual' | false;
   /** Names bound by LET or LAMBDA parameters (upper-case keys). */
@@ -267,6 +269,8 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
       if (!ctx.sheetExists(sheet)) return Err.REF;
       return { kind: 'ref', sheet, range: normalizeRange(node.start, node.end) };
     }
+    case 'structured':
+      return ctx.resolveStructured ? ctx.resolveStructured(node, ctx.sheet, ctx.row, ctx.col) : Err.REF;
     case 'name': {
       const local = ctx.locals?.get(node.name.toUpperCase());
       if (local !== undefined) return local;

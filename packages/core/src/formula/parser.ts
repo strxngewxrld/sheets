@@ -1,6 +1,6 @@
 import { MAX_COLS, MAX_ROWS, nameToCol, splitSheetPrefix } from '../address.js';
 import { errorFromCode } from '../values.js';
-import { FormulaParseError, type BinaryOp, type Node, type RefPoint } from './ast.js';
+import { FormulaParseError, type BinaryOp, type Node, type RefPoint, type StructuredArea, type StructuredRef } from './ast.js';
 import { tokenize, type Token } from './tokenizer.js';
 
 const BINARY_PRECEDENCE: Record<string, number> = {
@@ -53,6 +53,67 @@ export function refTokenToNode(text: string): Node {
     return withSheet({ type: 'range' as const, start, end, kind: 'rows' as const });
   }
   return withSheet({ type: 'range' as const, start: parseRefPoint(a), end: parseRefPoint(b), kind: 'cells' as const });
+}
+
+const AREAS: Record<string, StructuredArea> = { '#ALL': '#All', '#DATA': '#Data', '#HEADERS': '#Headers', '#TOTALS': '#Totals', '#THIS ROW': '#This Row' };
+
+function unescapeColumn(name: string): string {
+  return name.replace(/'(.)/g, '$1').trim();
+}
+
+/** Splits "[a],[b]:[c]" into bracket contents and the separators between them. */
+function bracketGroups(text: string): { items: string[]; seps: string[] } | null {
+  const items: string[] = [];
+  const seps: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    while (text[i] === ' ') i++;
+    if (text[i] !== '[') return null;
+    let j = i + 1;
+    while (j < text.length && text[j] !== ']') j += text[j] === "'" ? 2 : 1;
+    if (j >= text.length) return null;
+    items.push(text.slice(i + 1, j));
+    i = j + 1;
+    while (text[i] === ' ') i++;
+    if (i < text.length) {
+      if (text[i] !== ',' && text[i] !== ':') return null;
+      seps.push(text[i]!);
+      i++;
+    }
+  }
+  return { items, seps };
+}
+
+/** Parses the text of a structured reference token. */
+export function parseStructuredRef(text: string): StructuredRef {
+  const open = text.indexOf('[');
+  const table = text.slice(0, open);
+  const inner = text.slice(open + 1, -1);
+  const ref: StructuredRef = { areas: [] };
+  if (table) ref.table = table;
+  const addItem = (item: string, columns: string[]) => {
+    const area = AREAS[item.trim().toUpperCase()];
+    if (area) ref.areas.push(area);
+    else if (item.trim().startsWith('#')) throw new FormulaParseError(`Unknown table item "${item}"`, 0);
+    else columns.push(unescapeColumn(item));
+  };
+  const columns: string[] = [];
+  let body = inner.trim();
+  if (body.startsWith('@')) {
+    ref.areas.push('#This Row');
+    body = body.slice(1).trim();
+    if (body && !body.startsWith('[')) body = `[${body}]`;
+  }
+  if (body.startsWith('[')) {
+    const groups = bracketGroups(body);
+    if (!groups) throw new FormulaParseError(`Invalid table reference "${text}"`, 0);
+    groups.items.forEach((item) => addItem(item, columns));
+    const colonBetweenColumns = groups.seps.includes(':');
+    if (colonBetweenColumns && columns.length !== 2) throw new FormulaParseError(`Invalid column range in "${text}"`, 0);
+  } else if (body) addItem(body, columns);
+  if (columns.length > 2) throw new FormulaParseError(`Too many columns in "${text}"`, 0);
+  if (columns.length) ref.columns = [columns[0]!, columns[1] ?? columns[0]!];
+  return ref;
 }
 
 class Parser {
@@ -130,6 +191,13 @@ class Parser {
         return refTokenToNode(t.text);
       case 'name':
         return { type: 'name', name: t.text.replace(/^_xlpm\./i, '') };
+      case 'structured':
+        try {
+          return { type: 'structured', ...parseStructuredRef(t.text) };
+        } catch (e) {
+          if (e instanceof FormulaParseError) throw new FormulaParseError(e.message, t.start);
+          throw e;
+        }
       case 'func':
         return this.call(t);
       case 'lparen': {

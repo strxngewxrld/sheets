@@ -6,7 +6,7 @@ import type { Sheet } from '../sheet.js';
 import { styleKey, type BorderSide, type CellStyle } from '../style.js';
 import { isError } from '../values.js';
 import { Workbook } from '../workbook.js';
-import { tableCellStyle, tableColumnNames, tableFilteredRows, type TableTheme } from '../table.js';
+import { tableAt, tableCellStyle, tableColumnNames, tableFilteredRows, type TableTheme } from '../table.js';
 import { toArgb } from './colors.js';
 import { encodeOoxmlEscapes, escapeXml } from './xml.js';
 import { preserveXlsx } from './xlsx-preserve.js';
@@ -259,7 +259,7 @@ function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isA
       const sAttr = (s ? ` s="${s}"` : '') + (cell.spillRange ? ' cm="1"' : '');
       const v = cell.value;
       if (cell.formula !== undefined) {
-        const f = `<f${cell.spillRange ? ` t="array" ref="${formatRange(cell.spillRange)}"` : ''}>${escapeXml(addFutureFunctionPrefixes(cell.formula))}</f>`;
+        const f = `<f${cell.spillRange ? ` t="array" ref="${formatRange(cell.spillRange)}"` : ''}>${escapeXml(addFutureFunctionPrefixes(cell.formula, { table: tableAt(sheet, r, col)?.name }))}</f>`;
         if (typeof v === 'number') parts.push(`<c r="${ref}"${sAttr}>${f}<v>${v}</v></c>`);
         else if (typeof v === 'string') parts.push(`<c r="${ref}"${sAttr} t="str">${f}<v>${escapeXml(encodeOoxmlEscapes(v))}</v></c>`);
         else if (typeof v === 'boolean') parts.push(`<c r="${ref}"${sAttr} t="b">${f}<v>${v ? 1 : 0}</v></c>`);

@@ -6,6 +6,7 @@ import { hasUnknownFunctions } from '../formula/scope.js';
 import type { WorkbookData } from '../ops.js';
 import type { CellData } from '../sheet.js';
 import type { Workbook } from '../workbook.js';
+import { tableNameAt } from '../table.js';
 import { arr, attr, encodeOoxmlEscapes, escapeXml, parseXml, resolvePath, relsPathFor, text } from './xml.js';
 import { PreservedStyles } from './xlsx-preserve-styles.js';
 import { patchLayout } from './xlsx-preserve-layout.js';
@@ -40,7 +41,7 @@ function textValue(value: string): string {
   return escapeXml(encodeOoxmlEscapes(value));
 }
 
-function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: PreservedStyles | undefined, inheritedStyle: number, richStrings: Set<number>): string {
+function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: PreservedStyles | undefined, inheritedStyle: number, richStrings: Set<number>, table?: string): string {
   const valueChanged = canonical(payload(before)) !== canonical(payload(after));
   let result = node ? raw(xml, node) : `<${p}c r="${ref}"/>`;
   let root = xmlRoot(result), open = result.slice(0, root.openEnd);
@@ -56,7 +57,7 @@ function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before:
     if (before?.a || after?.a) protect(`Dynamische Matrix in ${ref}.`);
     let type: string | undefined, body = '';
     if (after?.f !== undefined) {
-      body = `<${p}f>${escapeXml(addFutureFunctionPrefixes(after.f))}</${p}f>`;
+      body = `<${p}f>${escapeXml(addFutureFunctionPrefixes(after.f, table ? { table } : {}))}</${p}f>`;
       // New/edited formulas are recalculated by Excel; never invent an error cache.
     } else if (typeof after?.v === 'string') {
       type = 'inlineStr'; body = `<${p}is><${p}t xml:space="preserve">${textValue(after.v)}</${p}t></${p}is>`;
@@ -141,7 +142,9 @@ function patchSheet(xml: string, before: WorkbookData['sheets'][number], after: 
       const col = parseAddress(ref)!.col;
       const columnStyle = child(root, 'cols')?.children.filter((n) => n.name === 'col').find((n) => col + 1 >= Number(nodeAttribute(xml, n, 'min')) && col + 1 <= Number(nodeAttribute(xml, n, 'max')));
       const inheritedStyle = Number((row && nodeAttribute(xml, row, 's')) ?? (columnStyle && nodeAttribute(xml, columnStyle, 'style')) ?? 0);
-      const value = updateCell(xml, node, ref, before.cells[ref], after.cells[ref], p, styles, inheritedStyle, richStrings);
+      const at = parseAddress(ref);
+      const table = at ? tableNameAt(after.tables ?? [], at.row, at.col) : undefined;
+      const value = updateCell(xml, node, ref, before.cells[ref], after.cells[ref], p, styles, inheritedStyle, richStrings, table);
       if (node) edits.push({ start: node.start - offset, end: node.end - offset, value });
       else {
         const next = row?.children.find((n) => n.name === 'c' && parseAddress(nodeAttribute(xml, n, 'r') ?? '')?.col! > col);

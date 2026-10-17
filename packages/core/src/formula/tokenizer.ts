@@ -8,6 +8,7 @@ export type TokenType =
   | 'ref'
   | 'func'
   | 'name'
+  | 'structured'
   | 'op'
   | 'lparen'
   | 'rparen'
@@ -91,7 +92,7 @@ export function tokenize(src: string): Token[] {
       const after = src[i + refM[0].length] ?? '';
       const isRowRangeOnly = /^\$?\d+:\$?\d+$/.test(refM[0]);
       const blockedByPrev = isRowRangeOnly && prev && (prev.type === 'number' || prev.type === 'ref');
-      if (!/[\w.(À-￿]/u.test(after) && !blockedByPrev) {
+      if (!/[\w.([À-￿]/u.test(after) && !blockedByPrev) {
         push('ref', refM[0].length);
         continue;
       }
@@ -106,6 +107,16 @@ export function tokenize(src: string): Token[] {
       const m = /^'(?:[^']|'')+'!/.exec(rest);
       push('unknown', m ? m[0].length : 1);
       continue;
+    }
+    // Structured table references: Table1[Col], Table1[[#Headers],[A]:[B]], [@Col].
+    const tableM = IDENT_RE.exec(rest);
+    const bracketAt = tableM && src[i + tableM[0].length] === '[' ? i + tableM[0].length : ch === '[' && !/^\[\d+\]/.test(rest) ? i : -1;
+    if (bracketAt >= 0) {
+      const end = closingBracket(src, bracketAt);
+      if (end > 0) {
+        push('structured', end + 1 - i);
+        continue;
+      }
     }
     const idM = IDENT_RE.exec(rest);
     if (idM) {
@@ -132,6 +143,18 @@ export function tokenize(src: string): Token[] {
     }
   }
   return tokens;
+}
+
+/** Index of the bracket closing the one at `open`, honouring nesting and ' escapes; -1 if unbalanced. */
+function closingBracket(src: string, open: number): number {
+  let depth = 0;
+  for (let j = open; j < src.length; j++) {
+    const c = src[j];
+    if (c === "'") j++;
+    else if (c === '[') depth++;
+    else if (c === ']' && --depth === 0) return j;
+  }
+  return -1;
 }
 
 function lastSignificant(tokens: Token[]): Token | undefined {

@@ -1,6 +1,6 @@
 import { colToName, MAX_COLS, MAX_ROWS, quoteSheetName, splitSheetPrefix } from '../address.js';
 import type { RefPoint } from './ast.js';
-import { parseFormula, parseRefPoint } from './parser.js';
+import { parseFormula, parseRefPoint, parseStructuredRef } from './parser.js';
 import { boundNames } from './scope.js';
 import { tokenize } from './tokenizer.js';
 
@@ -171,7 +171,44 @@ function lambdaParams(formula: string): Set<string> {
   try { return boundNames(parseFormula(formula)); } catch { return new Set(); }
 }
 
-export function addFutureFunctionPrefixes(formula: string): string {
+function escapeColumn(name: string): string {
+  return name.replace(/['#[\]@]/g, "'$&");
+}
+
+/**
+ * File form of a structured reference: always table-qualified, "@" written as
+ * [#This Row] (Excel stores Table1[[#This Row],[Col]] for Table1[@Col]).
+ */
+export function fileStructuredRef(text: string, table?: string): string {
+  let ref;
+  try { ref = parseStructuredRef(text); } catch { return text; }
+  const name = ref.table ?? table;
+  if (!name) return text;
+  if (!ref.table && !text.includes('@')) return name + text;
+  if (!ref.areas.includes('#This Row')) return name + text.slice(text.indexOf('['));
+  const items = ref.areas.map((a) => `[${a}]`);
+  const cols = ref.columns ? (ref.columns[0] === ref.columns[1] ? `[${escapeColumn(ref.columns[0])}]` : `[${escapeColumn(ref.columns[0])}]:[${escapeColumn(ref.columns[1])}]`) : '';
+  if (!cols && items.length === 1) return `${name}[${ref.areas[0]}]`;
+  return `${name}[${[...items, ...(cols ? [cols] : [])].join(',')}]`;
+}
+
+/** Display form of a file structured reference: Table1[[#This Row],[Col]] → Table1[@Col]. */
+function displayStructuredRef(text: string): string {
+  let ref;
+  try { ref = parseStructuredRef(text); } catch { return text; }
+  if (!ref.table || ref.areas.length !== 1 || ref.areas[0] !== '#This Row') return text;
+  if (!ref.columns) return `${ref.table}[@]`;
+  const one = (c: string) => (/^[A-Za-z_À-￿][\w.À-￿]*$/u.test(c) ? c : `[${escapeColumn(c)}]`);
+  if (ref.columns[0] === ref.columns[1]) return `${ref.table}[@${one(ref.columns[0])}]`;
+  return `${ref.table}[@[${escapeColumn(ref.columns[0])}]:[${escapeColumn(ref.columns[1])}]]`;
+}
+
+/**
+ * Converts a formula to the form stored in XLSX files: future-function and
+ * LAMBDA parameter prefixes, spill references as ANCHORARRAY and qualified
+ * structured references (`table` is the table containing the formula cell).
+ */
+export function addFutureFunctionPrefixes(formula: string, context: { table?: string } = {}): string {
   const tokens = tokenize(formula);
   const params = lambdaParams(formula);
   let out = '';
@@ -182,6 +219,8 @@ export function addFutureFunctionPrefixes(formula: string): string {
     if (t.type === 'ref' && tokens[next]?.text === '#') {
       out += `_xlfn.ANCHORARRAY(${t.text})`;
       i = next;
+    } else if (t.type === 'structured') {
+      out += fileStructuredRef(t.text, context.table);
     } else if ((t.type === 'name' || t.type === 'func') && params.has(t.text.toUpperCase())) {
       out += `_xlpm.${t.text}`;
     } else if (t.type === 'func' && FUTURE_FUNCTIONS.has(t.text.toUpperCase())) {
@@ -193,6 +232,6 @@ export function addFutureFunctionPrefixes(formula: string): string {
 
 export function stripFutureFunctionPrefixes(formula: string): string {
   return tokenize(formula)
-    .map((t) => (t.type === 'func' ? t.text.replace(/^(_xlfn\.)?(_xlws\.)?/i, '').replace(/^_xlpm\./i, '') : t.type === 'name' ? t.text.replace(/^_xlpm\./i, '') : t.text))
+    .map((t) => (t.type === 'func' ? t.text.replace(/^(_xlfn\.)?(_xlws\.)?/i, '').replace(/^_xlpm\./i, '') : t.type === 'name' ? t.text.replace(/^_xlpm\./i, '') : t.type === 'structured' ? displayStructuredRef(t.text) : t.text))
     .join('');
 }

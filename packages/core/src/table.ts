@@ -3,6 +3,9 @@ import type { Sheet } from './sheet.js';
 import type { CellStyle } from './style.js';
 import type { ApplyOptions, Workbook } from './workbook.js';
 import type { CellPatch } from './ops.js';
+import type { StructuredRef } from './formula/ast.js';
+import type { RefValue } from './formula/evaluator.js';
+import { Err, type CellError } from './values.js';
 
 export interface TableTheme {
   body: CellStyle;
@@ -162,4 +165,69 @@ export function tableColumnNames(sheet: Sheet, table: SheetTable): string[] {
     used.add(name.toUpperCase()); result.push(name);
   }
   return result;
+}
+
+/** Finds a table by name on any sheet (case-insensitive). */
+export function findTable(wb: Workbook, name: string): { sheet: Sheet; table: SheetTable } | undefined {
+  const upper = name.toUpperCase();
+  for (const sheet of wb.sheets) {
+    const table = sheet.tables.find((t) => t.name.toUpperCase() === upper);
+    if (table) return { sheet, table };
+  }
+  return undefined;
+}
+
+/** Name of the table containing a cell, given a sheet's table list. */
+export function tableNameAt(tables: readonly SheetTable[], row: number, col: number): string | undefined {
+  return tables.find((t) => {
+    const r = parseRange(t.range)?.range;
+    return r && row >= r.start.row && row <= r.end.row && col >= r.start.col && col <= r.end.col;
+  })?.name;
+}
+
+/**
+ * Resolves a structured reference to a cell range. Unqualified references
+ * ([@Col]) use the table that contains the formula cell.
+ */
+export function resolveStructuredRef(wb: Workbook, ref: StructuredRef, sheetName: string, row: number, col: number): RefValue | CellError {
+  let found: { sheet: Sheet; table: SheetTable } | undefined;
+  if (ref.table) found = findTable(wb, ref.table);
+  else {
+    const sheet = wb.getSheet(sheetName);
+    const table = sheet && tableAt(sheet, row, col);
+    if (sheet && table) found = { sheet, table };
+  }
+  if (!found) return Err.REF;
+  const { sheet, table } = found;
+  const range = parseRange(table.range)!.range;
+  let c1 = range.start.col;
+  let c2 = range.end.col;
+  if (ref.columns) {
+    const names = tableColumnNames(sheet, table).map((n) => n.toUpperCase());
+    const a = names.indexOf(ref.columns[0].toUpperCase());
+    const b = names.indexOf(ref.columns[1].toUpperCase());
+    if (a < 0 || b < 0) return Err.REF;
+    c1 = range.start.col + Math.min(a, b);
+    c2 = range.start.col + Math.max(a, b);
+  }
+  const dataStart = table.headerRow ? range.start.row + 1 : range.start.row;
+  const rows: [number, number][] = [];
+  for (const area of ref.areas.length ? ref.areas : ['#Data' as const]) {
+    switch (area) {
+      case '#All': rows.push([range.start.row, range.end.row]); break;
+      case '#Data': if (dataStart <= range.end.row) rows.push([dataStart, range.end.row]); break;
+      case '#Headers': if (!table.headerRow) return Err.REF; rows.push([range.start.row, range.start.row]); break;
+      case '#Totals': return Err.REF;
+      case '#This Row':
+        if (sheet.name.toUpperCase() !== sheetName.toUpperCase() || row < dataStart || row > range.end.row) return Err.VALUE;
+        rows.push([row, row]);
+        break;
+    }
+  }
+  if (!rows.length) return Err.REF;
+  return {
+    kind: 'ref',
+    sheet: sheet.name,
+    range: { start: { row: Math.min(...rows.map((r) => r[0])), col: c1 }, end: { row: Math.max(...rows.map((r) => r[1])), col: c2 } },
+  };
 }

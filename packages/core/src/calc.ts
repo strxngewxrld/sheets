@@ -5,7 +5,7 @@ import { parseFormula, walk } from './formula/parser.js';
 import { getFunction } from './formula/registry.js';
 import { boundNames } from './formula/scope.js';
 import type { Sheet } from './sheet.js';
-import { tableFilteredRows } from './table.js';
+import { resolveStructuredRef, tableFilteredRows } from './table.js';
 import { CellError, Err, type Scalar } from './values.js';
 import type { Workbook } from './workbook.js';
 
@@ -122,6 +122,9 @@ export class CalcEngine {
             };
             info.rangeRefs.push({ sheetId: target.id, range });
           }
+        } else if (n.type === 'structured') {
+          // Table ranges change with table edits; re-evaluate on every recalculation.
+          info.volatile = true;
         } else if (n.type === 'name') {
           if (!bound.has(n.name.toUpperCase())) info.volatile = true;
         } else if (n.type === 'func') {
@@ -346,6 +349,7 @@ export class CalcEngine {
     const wb = this.wb;
     const filtered = new Map<Sheet, Set<number>>();
     return {
+      resolveStructured: (ref, name, r, c) => resolveStructuredRef(wb, ref, name, r, c),
       rowHidden: (name, r) => {
         const s = wb.getSheet(name);
         if (!s) return false;
