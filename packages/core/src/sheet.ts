@@ -3,6 +3,7 @@ import type { ChartSpec } from './chart.js';
 import type { ConditionalFormatRule } from './conditional.js';
 import type { SheetTable } from './table.js';
 import type { CellStyle } from './style.js';
+import type { DataValidation } from './validation.js';
 import { scalarFromJson, scalarToJson, type JsonScalar, type Scalar } from './values.js';
 
 export interface Cell {
@@ -39,6 +40,7 @@ export interface SheetData {
   charts?: ChartSpec[];
   conditionalFormats?: ConditionalFormatRule[];
   tables?: SheetTable[];
+  validations?: DataValidation[];
   defaultColWidth?: number;
   defaultRowHeight?: number;
 }
@@ -59,6 +61,7 @@ export class Sheet {
   charts: ChartSpec[] = [];
   conditionalFormats: ConditionalFormatRule[] = [];
   tables: SheetTable[] = [];
+  validations: DataValidation[] = [];
   defaultColWidth = DEFAULT_COL_WIDTH;
   defaultRowHeight = DEFAULT_ROW_HEIGHT;
   private usedCache: RangeAddress | null | undefined;
@@ -157,6 +160,7 @@ export class Sheet {
     if (this.charts.length) data.charts = structuredClone(this.charts);
     if (this.conditionalFormats.length) data.conditionalFormats = structuredClone(this.conditionalFormats);
     if (this.tables.length) data.tables = structuredClone(this.tables);
+    if (this.validations.length) data.validations = structuredClone(this.validations);
     if (this.defaultColWidth !== DEFAULT_COL_WIDTH) data.defaultColWidth = this.defaultColWidth;
     if (this.defaultRowHeight !== DEFAULT_ROW_HEIGHT) data.defaultRowHeight = this.defaultRowHeight;
     return data;
@@ -187,6 +191,7 @@ export class Sheet {
     sheet.charts = structuredClone(data.charts ?? []);
     sheet.conditionalFormats = structuredClone(data.conditionalFormats ?? []);
     sheet.tables = structuredClone(data.tables ?? []);
+    sheet.validations = structuredClone(data.validations ?? []);
     if (data.defaultColWidth) sheet.defaultColWidth = data.defaultColWidth;
     if (data.defaultRowHeight) sheet.defaultRowHeight = data.defaultRowHeight;
     return sheet;

@@ -7,6 +7,8 @@ import type { WorkbookData } from '../ops.js';
 import type { CellData } from '../sheet.js';
 import type { Workbook } from '../workbook.js';
 import { tableNameAt } from '../table.js';
+import type { SheetData } from '../sheet.js';
+import { validationsXml } from './xlsx-validations.js';
 import { arr, attr, encodeOoxmlEscapes, escapeXml, parseXml, resolvePath, relsPathFor, text } from './xml.js';
 import { PreservedStyles } from './xlsx-preserve-styles.js';
 import { patchLayout } from './xlsx-preserve-layout.js';
@@ -29,7 +31,7 @@ function model(data: WorkbookData): unknown {
 }
 function metadata(data: WorkbookData): unknown {
   const { xlsxSource: _source, activeSheet: _active, ...rest } = data;
-  return { ...rest, sheets: rest.sheets.map(({ cells: _cells, colWidths: _cols, rowHeights: _rows, ...sheet }) => sheet) };
+  return { ...rest, sheets: rest.sheets.map(({ cells: _cells, colWidths: _cols, rowHeights: _rows, validations: _validations, ...sheet }) => sheet) };
 }
 function relations(files: Record<string, Uint8Array>, part: string): { id: string; target: string; type: string }[] {
   const bytes = files[relsPathFor(part)];
@@ -39,6 +41,18 @@ function relations(files: Record<string, Uint8Array>, part: string): { id: strin
 }
 function textValue(value: string): string {
   return escapeXml(encodeOoxmlEscapes(value));
+}
+
+const AFTER_VALIDATIONS = ['hyperlinks', 'printOptions', 'pageMargins', 'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors', 'smartTags', 'drawing', 'legacyDrawing', 'legacyDrawingHF', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'];
+
+/** Replaces the sheet's <dataValidations>; Excel 2010 rules in extLst cannot be merged safely. */
+function patchValidations(xml: string, before: SheetData, after: SheetData): string {
+  const rules = after.validations ?? [];
+  if (canonical(before.validations ?? []) === canonical(rules)) return xml;
+  const root = xmlRoot(xml);
+  const ext = child(root, 'extLst');
+  if (ext && /dataValidations/.test(raw(xml, ext))) protect(`Erweiterte Datenüberprüfung (Excel 2010) in ${before.name}.`);
+  return setChild(xml, 'dataValidations', rules.length ? validationsXml(rules, prefix(root)) : '', AFTER_VALIDATIONS);
 }
 
 function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: PreservedStyles | undefined, inheritedStyle: number, richStrings: Set<number>, table?: string): string {
@@ -261,7 +275,7 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
       }
     }
     if (child(xmlRoot(originalSheet), 'sheetProtection') && canonical(before) !== canonical(after)) protect(`Blattschutz in ${before.name}.`);
-    const patched = patchLayout(patchSheet(originalSheet, before, after, styles, date1904, wbRels.some((r) => r.type.endsWith('/calcChain')), richStrings, lockedRanges), before, after);
+    const patched = patchValidations(patchLayout(patchSheet(originalSheet, before, after, styles, date1904, wbRels.some((r) => r.type.endsWith('/calcChain')), richStrings, lockedRanges), before, after), before, after);
     if (patched !== originalSheet) { xmlRoot(patched); files[entry.rel.target] = strToU8(patched); }
   }
   if (stylesPath && styles) { xmlRoot(styles.xml); files[stylesPath] = strToU8(styles.xml); }

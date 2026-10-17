@@ -1,6 +1,6 @@
 import { cellKey, keyToAddress, MAX_COLS, MAX_ROWS, parseRange, rangesIntersect, type RangeAddress } from './address.js';
 import type { Node } from './formula/ast.js';
-import { deref, evaluate, evaluateCell, isRef, type EvalContext, type Matrix } from './formula/evaluator.js';
+import { deref, evaluate, evaluateCell, isRef, type EvalContext, type EvalValue, type Matrix } from './formula/evaluator.js';
 import { parseFormula, walk } from './formula/parser.js';
 import { getFunction } from './formula/registry.js';
 import { boundNames } from './formula/scope.js';
@@ -408,6 +408,13 @@ export class CalcEngine {
       out.push(row);
     }
     return out;
+  }
+
+  /** Evaluates a formula without reducing it to one cell value (ranges stay references). */
+  evaluateRaw(formula: string, sheet: Sheet, row = 0, col = 0): EvalValue {
+    const ast = this.parse(formula.startsWith('=') ? formula.slice(1) : formula);
+    if (ast instanceof CellError) return ast;
+    return evaluate(ast, this.contextFor(sheet, row, col));
   }
 
   /** Evaluates an ad-hoc formula in the context of a sheet (not stored). */

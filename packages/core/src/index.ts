@@ -12,6 +12,7 @@ export * from './commands.js';
 export * from './conditional.js';
 export * from './pivot.js';
 export * from './table.js';
+export * from './validation.js';
 export { CalcEngine } from './calc.js';
 
 export type { Node as FormulaNode, RefPoint } from './formula/ast.js';

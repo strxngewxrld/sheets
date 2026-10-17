@@ -10,6 +10,7 @@ import { tableAt, tableCellStyle, tableColumnNames, tableFilteredRows, type Tabl
 import { toArgb } from './colors.js';
 import { encodeOoxmlEscapes, escapeXml } from './xml.js';
 import { preserveXlsx } from './xlsx-preserve.js';
+import { validationsXml } from './xlsx-validations.js';
 
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -288,6 +289,7 @@ function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isA
     }
     parts.push(`<conditionalFormatting sqref="${escapeXml(rule.range)}">${content}</conditionalFormatting>`);
   });
+  if (sheet.validations.length) parts.push(validationsXml(sheet.validations, ''));
   parts.push('<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
   if (drawingRelId) parts.push(`<drawing r:id="${drawingRelId}"/>`);
   if (tableRelIds.length) parts.push(`<tableParts count="${tableRelIds.length}">${tableRelIds.map((id) => `<tablePart r:id="${id}"/>`).join('')}</tableParts>`);

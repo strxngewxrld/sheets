@@ -14,6 +14,7 @@ import { parseFormula } from '../formula/parser.js';
 import { hasUnknownFunctions } from '../formula/scope.js';
 import { CONDITIONAL_OPERATORS, type ConditionalFormatRule, type ConditionalOperator } from '../conditional.js';
 import { TABLE_THEMES, type TableTheme } from '../table.js';
+import { readValidations } from './xlsx-validations.js';
 import { applyTint, DEFAULT_THEME, INDEXED_COLORS } from './colors.js';
 import { arr, attr, collectText, decodeOoxmlEscapes, flag, numAttr, parseXml, relsPathFor, resolvePath, text, type XNode } from './xml.js';
 import { encodeXlsxArchive } from './xlsx-preserve.js';
@@ -438,6 +439,8 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
     }
   }
   if (conditional.length) sheet.conditionalFormats = conditional.sort((a, b) => a.priority - b.priority).map((c) => c.rule);
+  const validations = readValidations(ws);
+  if (validations.length) sheet.validations = validations;
 
   const pane = arr(ws.sheetViews?.sheetView)[0]?.pane;
   if (pane && (attr(pane, 'state') === 'frozen' || attr(pane, 'state') === 'frozenSplit')) {

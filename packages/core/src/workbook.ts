@@ -17,6 +17,7 @@ import type { Scalar } from './values.js';
 import type { CellStyle } from './style.js';
 import { adjustPivotForStructure, type PivotTableSpec } from './pivot.js';
 import { validateTables } from './table.js';
+import { validateValidations, validationRanges, type DataValidation } from './validation.js';
 
 export interface ChangeEvent {
   ops: Operation[];
@@ -362,6 +363,13 @@ export class Workbook {
         sheet.conditionalFormats = structuredClone(op.rules);
         return [{ type: 'setConditionalFormats', sheet: sheet.name, rules: prev }];
       }
+      case 'setValidations': {
+        validateValidations(op.rules);
+        const sheet = this.requireSheet(op.sheet);
+        const prev = structuredClone(sheet.validations);
+        sheet.validations = structuredClone(op.rules);
+        return [{ type: 'setValidations', sheet: sheet.name, rules: prev }];
+      }
       case 'setPivotTables': {
         const ids = new Set<string>();
         for (const table of op.tables) {
@@ -412,6 +420,10 @@ export class Workbook {
       for (const rule of sheet.conditionalFormats) {
         if (rule.type !== 'colorScale') rule.formulas = rule.formulas.map((f) => fn(f, sheet.name));
       }
+      for (const rule of sheet.validations) {
+        if (rule.formula1 !== undefined && !/^".*"$/s.test(rule.formula1)) rule.formula1 = fn(rule.formula1, sheet.name);
+        if (rule.formula2 !== undefined) rule.formula2 = fn(rule.formula2, sheet.name);
+      }
     }
     for (const n of this.names.values()) n.ref = fn(n.ref, this.sheets[0]?.name ?? '');
   }
@@ -450,6 +462,19 @@ export class Workbook {
       const key = isRow ? 'row' : 'col';
       const offset = count < 0 && range.start[key] >= index && range.start[key] < index - count ? index - count - range.start[key] : 0;
       return [{ ...rule, range: ref, ...(rule.type !== 'colorScale' && offset ? { formulas: rule.formulas.map((f) => shiftFormula(f, isRow ? offset : 0, isRow ? 0 : offset)) } : {}) }];
+    });
+    sheet.validations = sheet.validations.flatMap((rule) => {
+      const before = validationRanges(rule);
+      const parts = before.map((r) => adjustFormulaForStructure(formatRange(r), sheet.name, change)).filter((r) => r !== '#REF!');
+      if (!parts.length) return [];
+      // Formulas are relative to the first range; keep them anchored when its start moves by deletion.
+      const first = before[0]!, key = isRow ? 'row' : 'col';
+      const offset = count < 0 && first.start[key] >= index && first.start[key] < index - count ? index - count - first.start[key] : 0;
+      const shift = (f: string | undefined) => (f === undefined || !offset || /^".*"$/s.test(f) ? f : shiftFormula(f, isRow ? offset : 0, isRow ? 0 : offset));
+      const updated: DataValidation = { ...rule, range: parts.join(' ') };
+      if (rule.formula1 !== undefined) updated.formula1 = shift(rule.formula1)!;
+      if (rule.formula2 !== undefined) updated.formula2 = shift(rule.formula2)!;
+      return [updated];
     });
     const limit = isRow ? MAX_ROWS : MAX_COLS;
     const move = (pos: number): number | null => {

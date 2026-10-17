@@ -3,6 +3,7 @@ import type { ConditionalFormatRule } from './conditional.js';
 import type { PivotTableSpec } from './pivot.js';
 import type { SheetTable } from './table.js';
 import type { CellData, SheetData } from './sheet.js';
+import type { DataValidation } from './validation.js';
 
 /** A single cell write. `data: null` deletes the cell (value, formula and style). */
 export interface CellPatch {
@@ -42,6 +43,7 @@ export type Operation =
   | { type: 'setConditionalFormats'; sheet: string; rules: ConditionalFormatRule[] }
   | { type: 'setPivotTables'; tables: PivotTableSpec[] }
   | { type: 'setTables'; sheet: string; tables: SheetTable[] }
+  | { type: 'setValidations'; sheet: string; rules: DataValidation[] }
   | { type: 'setName'; name: string; ref: string | null }
   | { type: 'restore'; data: WorkbookData };
 
