@@ -1,125 +1,129 @@
 #!/usr/bin/env node
-/**
- * Sheets als geprüftes VSIX in einer npm-Hülle auf GitHub Packages bereitstellen.
- * Aufruf: npm run publish:github -- [--owner <user-oder-org>]
- *   [--bump patch|minor|major|none] [--dry-run]
- *
- * Standard: Patch-Version anheben. --bump none nutzt die vorbereitete Version.
- * Ein Dry-Run verändert weder Version noch Git-Historie und lädt nichts hoch.
- * Es werden keine Commits, Tags, GitHub Releases oder Marketplace-Releases angelegt.
- */
+/** Build and verify Sheets, then attach the VSIX directly to a GitHub Release. */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const output = join(root, 'artifacts', 'github-package');
-const registry = 'https://npm.pkg.github.com';
-const manifestPath = join(root, 'package.json');
-const readManifest = () => JSON.parse(readFileSync(manifestPath, 'utf8'));
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, { cwd: root, stdio: 'inherit', ...options });
 }
-function npm(args, options = {}) {
-  // npm run provides the CLI path; using Node avoids Windows .cmd quoting issues.
-  if (process.env.npm_execpath) return run(process.execPath, [process.env.npm_execpath, ...args], options);
-  return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
-    shell: process.platform === 'win32', ...options,
-  });
+function output(command, args) {
+  return run(command, args, { stdio: 'pipe', encoding: 'utf8' }).trim();
 }
-function step(title) { console.log(`\n${title}`); }
+function npm(args) {
+  if (process.env.npm_execpath) return run(process.execPath, [process.env.npm_execpath, ...args]);
+  return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { shell: process.platform === 'win32' });
+}
 
-function main() {
+export function releaseRepository(source, ownerOverride) {
+  const match = /^(?:git\+https:\/\/github\.com\/|https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([a-z\d-]+)\/([a-z\d_.-]+?)\/?$/i.exec(source.replace(/\.git\/?$/, ''));
+  if (!match) throw new Error('Kein GitHub-Repository gefunden. repository.url oder origin prüfen.');
+  const owner = (ownerOverride ?? match[1]).trim().toLowerCase();
+  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/.test(owner)) throw new Error('Ungültiger GitHub-Owner.');
+  return `${owner}/${match[2]}`;
+}
+
+export function releaseArgs({ repository, tag, asset, notes, title, draft }) {
+  return ['release', 'create', tag, asset, '--repo', repository, '--verify-tag', '--title', title,
+    '--notes-file', notes, ...(draft ? ['--draft'] : [])];
+}
+
+export function releaseNotes(changelog, version, vsixName) {
+  const lines = changelog.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === `## ${version}`);
+  const end = start < 0 ? -1 : lines.findIndex((line, index) => index > start && /^## /.test(line));
+  const changes = start < 0 ? '' : lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim();
+  return (changes ? `${changes}\n\n` : '') +
+    `Die Datei \`${vsixName}\` unter Assets herunterladen und in VS Code über „Extensions: Install from VSIX…“ installieren.\n`;
+}
+
+/** Verify lightweight and annotated tags against the exact local build commit. */
+export function verifyRemoteTag(repository, tag, head, read = output) {
+  let object = JSON.parse(read('gh', ['api', `repos/${repository}/git/ref/tags/${tag}`, '--jq', '.object']));
+  for (let depth = 0; object.type === 'tag' && depth < 16; depth++) {
+    object = JSON.parse(read('gh', ['api', `repos/${repository}/git/tags/${object.sha}`, '--jq', '.object']));
+  }
+  if (object.type !== 'commit' || object.sha !== head) {
+    throw new Error(`Der GitHub-Tag ${tag} zeigt nicht auf den aktuellen Commit. Passenden Release-Commit auschecken.`);
+  }
+}
+
+export function main() {
   const { values } = parseArgs({ options: {
-    owner: { type: 'string' }, bump: { type: 'string', default: 'patch' },
-    'dry-run': { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h' },
+    owner: { type: 'string' },
+    // Retain the previously documented --bump none invocation.
+    bump: { type: 'string', default: 'none' },
+    'dry-run': { type: 'boolean', default: false }, draft: { type: 'boolean', default: false },
+    help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) {
-    console.log('npm run publish:github -- [--owner <user-oder-org>] [--bump patch|minor|major|none] [--dry-run]\n' +
-      'Owner: --owner, GITHUB_OWNER oder Repository-Owner. Bump: patch (Standard).\n' +
-      'Token: NODE_AUTH_TOKEN oder GITHUB_TOKEN; für lokale Uploads PAT (classic) mit write:packages.\n' +
-      'Dry-Run: lokale Tests, VSIX-Prüfung und npm publish --dry-run; keine Versionsänderung und kein Upload.');
+    console.log('npm run publish:github -- [--owner <user-oder-org>] [--dry-run] [--draft]\n' +
+      'Lädt die geprüfte VSIX direkt als GitHub-Release-Asset hoch. Keine npm-Veröffentlichung.\n' +
+      'Voraussetzung: GitHub CLI (gh), Anmeldung und gepushter Tag v<package.json-Version> auf HEAD.\n' +
+      '--dry-run baut und prüft lokal, schreibt einen Release-Plan und ruft GitHub nicht auf.\n' +
+      '--bump none bleibt kompatibel; Versionsänderungen vorab committen und taggen.');
     return;
   }
-  const bump = values.bump;
-  const dryRun = values['dry-run'];
-  if (!['patch', 'minor', 'major', 'none'].includes(bump)) throw new Error('Ungültiger --bump (patch, minor, major oder none).');
-
-  const initial = readManifest();
-  const source = typeof initial.repository === 'string' ? initial.repository : initial.repository?.url;
-  const remote = source || run('git', ['remote', 'get-url', 'origin'], { stdio: 'pipe', encoding: 'utf8' }).trim();
-  const match = /^(?:git\+https:\/\/github\.com\/|https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([a-z\d-]+)\/([a-z\d_.-]+?)\/?$/i.exec(remote.replace(/\.git\/?$/, ''));
-  if (!match) throw new Error('Kein GitHub-Repository gefunden. repository.url oder origin auf das GitHub-Repo setzen.');
-  const repository = { type: 'git', url: `git+https://github.com/${match[1]}/${match[2]}.git` };
-  const owner = (values.owner ?? process.env.GITHUB_OWNER ?? match[1]).trim().toLowerCase();
-  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/.test(owner)) throw new Error('Ungültiger GitHub-Owner.');
-  const token = process.env.NODE_AUTH_TOKEN || process.env.GITHUB_TOKEN || '';
-  if (!token && !dryRun) throw new Error('NODE_AUTH_TOKEN oder GITHUB_TOKEN für GitHub Packages setzen (write:packages).');
-
-  step('Arbeitsverzeichnis prüfen');
-  const dirty = run('git', ['status', '--porcelain'], { stdio: 'pipe', encoding: 'utf8' }).trim();
-  if (dirty && !dryRun) throw new Error('Es gibt nicht committete Änderungen. Vor der Veröffentlichung committen oder zunächst --dry-run verwenden.');
-  if (dirty) console.log('Dry-Run mit lokalen Änderungen; keine Versionsänderung und kein Upload.');
-
-  step('Tests ausführen');
-  npm(['test']);
-  if (bump !== 'none' && !dryRun) {
-    step(`Root-Version anheben (${bump})`);
-    npm(['version', bump, '--no-git-tag-version', '--ignore-scripts', '--workspaces=false']);
-    console.log('Bei späterem Abbruch bleibt die angehobene Version bestehen. Wiederholung mit --bump none.');
-  }
-  const manifest = readManifest();
-  const version = manifest.version;
-  const vsixName = `${manifest.name}-${version}.vsix`;
-  const packageName = `@${owner}/${manifest.name}`;
-
-  step(`VSIX bauen und prüfen (${vsixName})`);
-  // Runs the existing typecheck/build/vsce pipeline and the actual VSIX verifier.
-  npm(['run', 'package']);
-
-  step(`GitHub-Package vorbereiten (${packageName}@${version})`);
-  rmSync(output, { recursive: true, force: true });
-  mkdirSync(output, { recursive: true });
-  copyFileSync(join(root, 'artifacts', vsixName), join(output, vsixName));
-  copyFileSync(join(root, 'LICENSE'), join(output, 'LICENSE'));
-  copyFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), join(output, 'THIRD_PARTY_NOTICES.md'));
-  writeFileSync(join(output, 'package.json'), JSON.stringify({
-    name: packageName, version,
-    description: `${manifest.displayName} – VS-Code-Extension als VSIX`,
-    license: manifest.license,
-    ...(manifest.author ? { author: manifest.author } : {}),
-    repository,
-    files: [vsixName, 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
-    publishConfig: { registry },
-  }, null, 2) + '\n');
-  writeFileSync(join(output, 'README.md'), `# ${manifest.displayName} ${version}\n\n` +
-    'Dieses Paket enthält die Extension als VSIX, keine JavaScript-Bibliothek.\n' +
-    `Quellcode: https://github.com/${match[1]}/${match[2]}\n\n` +
-    'Mit einem GitHub-Token mit read:packages anmelden und installieren:\n\n```sh\n' +
-    `npm login --scope=@${owner} --auth-type=legacy --registry=${registry}\n` +
-    `npm pack ${packageName}@${version} --registry=${registry}\n` +
-    `tar -xzf ${owner}-${manifest.name}-${version}.tgz package/${vsixName}\n` +
-    `code --install-extension package/${vsixName}\n` + '```\n');
-  // Only a placeholder is written. Never persist the credential itself.
-  writeFileSync(join(output, '.npmrc'),
-    `@${owner}:registry=${registry}\n//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}\n`);
-
-  step(dryRun ? 'Probelauf: npm publish --dry-run' : `Veröffentlichen: ${packageName}@${version}`);
-  npm(['publish', '--registry', registry, '--workspaces=false', '--ignore-scripts', ...(dryRun ? ['--dry-run'] : [])], {
-    cwd: output, env: { ...process.env, NODE_AUTH_TOKEN: dryRun ? 'dry-run' : token },
-  });
-  console.log(`\nFertig: ${packageName}@${version}${dryRun ? ' (Dry-Run, nichts hochgeladen)' : ''}`);
-  console.log(`Paketinhalt: ${output}`);
-  if (bump !== 'none' && !dryRun) console.log(
-    `Version ${version} steht in package.json und package-lock.json. README-Installationsbeispiel und CHANGELOG aktualisieren, danach committen und bei Bedarf taggen.`,
+  if (values.bump !== 'none') throw new Error(
+    'Versionen vorab mit npm version patch|minor|major --no-git-tag-version --workspaces=false anheben, Release-Dateien aktualisieren, committen und taggen. Zum Veröffentlichen --bump none verwenden (Standard).',
   );
+  const dryRun = values['dry-run'];
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const source = typeof manifest.repository === 'string' ? manifest.repository : manifest.repository?.url;
+  const repository = releaseRepository(source || output('git', ['remote', 'get-url', 'origin']), values.owner ?? process.env.GITHUB_OWNER);
+  const version = manifest.version, tag = `v${version}`;
+  const head = output('git', ['rev-parse', 'HEAD']);
+  const dirty = () => output('git', ['status', '--porcelain']);
+  if (!dryRun) {
+    if (dirty()) throw new Error('Vor der Veröffentlichung alle Änderungen committen und den Release-Tag pushen. Für lokale Prüfungen --dry-run verwenden.');
+    try { output('gh', ['--version']); }
+    catch { throw new Error('GitHub CLI (gh) installieren und gh auth login ausführen oder GH_TOKEN/GITHUB_TOKEN setzen.'); }
+    run('gh', ['auth', 'status', '--hostname', 'github.com']);
+    try { verifyRemoteTag(repository, tag, head); }
+    catch (error) { throw new Error(`Release-Tag prüfen: ${error.message}\nTag ${tag} muss in ${repository} existieren und auf HEAD zeigen.`); }
+  } else {
+    console.log('Dry-Run: keine Versionsänderung, kein GitHub-Aufruf und kein Upload.');
+  }
+
+  console.log('\nTests ausführen');
+  npm(['test']);
+  console.log('\nVSIX bauen und prüfen');
+  npm(['run', 'package']);
+  if (!dryRun && (dirty() || output('git', ['rev-parse', 'HEAD']) !== head)) {
+    throw new Error('Der Arbeitsstand wurde während des Builds verändert. Vor Veröffentlichung prüfen und erneut starten.');
+  }
+
+  const vsixName = `${manifest.name}-${version}.vsix`;
+  const asset = join(root, 'artifacts', vsixName);
+  const notes = join(root, 'artifacts', `${tag}-release-notes.md`);
+  const title = `${manifest.displayName} ${version}`;
+  mkdirSync(join(root, 'artifacts'), { recursive: true });
+  writeFileSync(notes, releaseNotes(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version, vsixName));
+  const args = releaseArgs({ repository, tag, asset, notes, title, draft: values.draft });
+  const plan = join(root, 'artifacts', `${tag}-release-plan.json`);
+  writeFileSync(plan, JSON.stringify({ repository, tag, commit: head, version, asset,
+    sha256: createHash('sha256').update(readFileSync(asset)).digest('hex'),
+    draft: values.draft, command: ['gh', ...args],
+  }, null, 2) + '\n');
+  console.log(`\nRelease-Plan: ${plan}`);
+  if (dryRun) {
+    console.log(`Geplant: ${repository} / ${tag}${values.draft ? ' (Entwurf)' : ''}, Asset ${vsixName}. Nichts veröffentlicht.`);
+    return;
+  }
+  // gh uploads assets to a draft before publishing; existing releases are not overwritten.
+  run('gh', args);
+  console.log(`\nFertig: ${repository} / ${tag}${values.draft ? ' (Entwurf)' : ''}`);
 }
 
-try { main(); }
-catch (error) {
-  console.error(`\nAbbruch: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try { main(); }
+  catch (error) {
+    console.error(`\nAbbruch: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }

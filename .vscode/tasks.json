@@ -16,6 +16,6 @@
     { "type": "npm", "script": "build", "group": { "kind": "build", "isDefault": true }, "problemMatcher": "$tsc" },
     { "type": "npm", "script": "test", "group": "test", "problemMatcher": [] },
     { "type": "npm", "script": "package", "problemMatcher": [] },
-    { "type": "shell", "command": "npm", "label": "Sheets: Publishing-Probelauf", "detail": "Tests, VSIX-Paketierung und GitHub-Package-Dry-Run ohne Upload", "args": ["run", "publish:github", "--", "--dry-run"], "options": { "cwd": "${workspaceFolder}" }, "problemMatcher": [] }
+    { "type": "shell", "command": "npm", "label": "Sheets: Publishing-Probelauf", "detail": "Tests, VSIX-Prüfung und Release-Plan ohne GitHub-Aufruf", "args": ["run", "publish:github", "--", "--dry-run"], "options": { "cwd": "${workspaceFolder}" }, "problemMatcher": [] }
   ]
 }

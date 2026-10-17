@@ -11,7 +11,7 @@ packages/mcp/     Optionaler MCP-Server
 test/             Extension-Tests und echter VS-Code-Host-Test
 media/            Icon-Quellen, PNG und Vorschau
 scripts/          Build, Icon-Generierung, Paketierung und Paketprüfung
-tools/            Veröffentlichung des VSIX über GitHub Packages
+tools/            Veröffentlichung des VSIX über GitHub Releases
 ```
 
 Die ausführliche [Framework-Dokumentation](docs/framework.md) beschreibt die internen APIs. Weitere Dokumente: [Copilot-Anbindung](docs/copilot.md) und [XLSX-Speicherschutz](docs/xlsx-compatibility.md).
@@ -43,24 +43,40 @@ Die ausführliche [Framework-Dokumentation](docs/framework.md) beschreibt die in
 
 Die Extension-ID bleibt `sheets.sheets-vscode`. Das Repository im Manifest verweist auf `strxngewxrld/sheets`. Für eine Marketplace-Veröffentlichung ist weiterhin ein eigener/verifizierter Publisher und die Anmeldung für `vsce` nötig. Die CI erzeugt nur ein herunterladbares VSIX-Artefakt und veröffentlicht nichts.
 
-### GitHub Packages
+### GitHub Releases
 
-`tools/publish-github.mjs` verwendet die Root-Extension und den vorhandenen Paketierungs- und Prüfpfad. Es führt `npm test` und `npm run package` aus und erstellt unter `artifacts/github-package/` eine separate npm-Hülle `@strxngewxrld/sheets-vscode`. Diese enthält nur VSIX, Installationsanleitung und Lizenzen. Das Root-Paket bleibt privat, die Extension-ID unverändert. GitHub Packages verwendet dafür die [npm-Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry); es entsteht kein GitHub Release und kein Marketplace-Eintrag.
+`tools/publish-github.mjs` führt `npm test` und `npm run package` aus und lädt die geprüfte `artifacts/sheets-vscode-<version>.vsix` direkt als Asset eines Releases `v<version>` hoch. Es gibt keine npm-Hülle, keine npm-Veröffentlichung und keine `.npmrc`. Die Extension-ID bleibt unverändert.
 
 ```bash
-# Lokal prüfen: keine Versionsänderung, kein Token nötig, kein Upload
+# Lokal prüfen: kein Token und keine GitHub CLI nötig, keine Versionsänderung
 npm run publish:github -- --dry-run
 
-# Vorbereitete Version veröffentlichen, nachdem alle Änderungen committet sind
-# NODE_AUTH_TOKEN oder GITHUB_TOKEN vorher in der Umgebung setzen
-npm run publish:github -- --bump none
+# Den vorbereiteten, committeten und getaggten Stand veröffentlichen
+npm run publish:github
 
-# Alternativ beim Veröffentlichen die Patch-Version anheben (Standard)
+# Optional nur einen Release-Entwurf mit VSIX anlegen
+npm run publish:github -- --draft
+```
+
+Für einen echten Upload die [GitHub CLI](https://cli.github.com/) installieren und `gh auth login --hostname github.com` ausführen. Alternativ `GH_TOKEN` oder `GITHUB_TOKEN` in der Umgebung setzen. Der Token benötigt Schreibzugriff auf Repository-Inhalte (`Contents: write` bei einem Fine-grained Token; `contents: write` für den Actions-Token). `NODE_AUTH_TOKEN` und `packages: write` werden nicht mehr verwendet. Tokens werden nicht in Dateien geschrieben.
+
+Das Ziel ist standardmäßig `strxngewxrld/sheets`; `--owner` oder `GITHUB_OWNER` können den Owner ändern. Das Skript verlangt ein sauberes Git-Arbeitsverzeichnis und einen bereits gepushten Tag `v<package.json-Version>`, der exakt auf den aktuellen Commit zeigt. Sowohl einfache als auch annotierte Tags werden geprüft. Es erzeugt keine Commits oder Tags und überschreibt keine vorhandenen Releases oder Assets. Ein gescheiterter Upload kann einen Release-Entwurf hinterlassen; diesen vor einer Wiederholung auf GitHub prüfen und gegebenenfalls entfernen.
+
+Eine neue Version vorab vorbereiten:
+
+```bash
+npm version patch --no-git-tag-version --ignore-scripts --workspaces=false
+# CHANGELOG.md und das Installationsbeispiel in README.md aktualisieren
+# Änderungen committen und pushen, dann den passenden Tag anlegen und pushen:
+git tag v<VERSION>
+git push origin v<VERSION>
 npm run publish:github
 ```
 
-Der Owner kommt aus `--owner`, dann `GITHUB_OWNER`, dann dem Repository. Lokal ist ein Personal Access Token (classic) mit `write:packages` erforderlich; in GitHub Actions braucht `GITHUB_TOKEN` die Berechtigung `packages: write`. Tokens werden nur über die Umgebung übergeben, nicht in Dateien geschrieben. Die erzeugte `.npmrc` enthält einen Variablen-Platzhalter. Außerhalb eines Dry-Runs verlangt das Skript ein sauberes Git-Arbeitsverzeichnis. Es legt keine Commits oder Tags an.
+`<VERSION>` durch die neue Version aus `package.json` ersetzen. Die frühere Option `--bump none` bleibt kompatibel; andere `--bump`-Werte werden mit einem Hinweis auf die Vorbereitung abgelehnt. Standardmäßig wird die bereits vorbereitete Version verwendet.
 
-`--bump patch|minor|major` aktualisiert nur Root-Manifest und Lockfile, keine internen Workspaces. Nach einem späteren Fehler bleibt die angehobene Version bestehen; mit `--bump none` wiederholen. README-Installationsbeispiel und CHANGELOG müssen zur Release-Version passen. Ein Dry-Run ignoriert Versionsanhebungen und nutzt immer die aktuelle Version. In VS Code steht die Task **Sheets: Publishing-Probelauf** bereit.
+Der Dry-Run führt alle lokalen Tests und die VSIX-Prüfung aus und schreibt `artifacts/v<version>-release-plan.json` mit Ziel, Commit, Asset, SHA-256 und dem geplanten CLI-Aufruf sowie `artifacts/v<version>-release-notes.md`. Er kontaktiert GitHub nicht und verändert weder Version noch Git-Historie. Remote-Berechtigungen und Tag-Verfügbarkeit werden erst bei einem echten Upload geprüft. Die Release Notes übernehmen den passenden Versionsabschnitt aus `CHANGELOG.md` und ergänzen den VSIX-Installationshinweis. In VS Code steht die Task **Sheets: Publishing-Probelauf** bereit.
+
+Die Veröffentlichung nutzt [`gh release create`](https://cli.github.com/manual/gh_release_create) mit `--verify-tag` und dem VSIX-Pfad. Die GitHub CLI lädt Assets zunächst in einen Entwurf und veröffentlicht anschließend; `--draft` lässt den Entwurf bestehen. Die benötigten Berechtigungen beschreibt die [GitHub-Releases-API](https://docs.github.com/en/rest/releases/releases#create-a-release).
 
 Bei einem Versionswechsel `package.json`, `package-lock.json`, `CHANGELOG.md` und das Installationsbeispiel in `README.md` aktualisieren.
