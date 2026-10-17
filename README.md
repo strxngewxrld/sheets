@@ -23,7 +23,7 @@ Voraussetzungen: VS Code 1.95 oder neuer; zum Entwickeln und Paketieren Node.js 
 
 ## Erste Schritte
 
-- Eine `.xlsx`-Datei öffnen: Sie erscheint direkt im Sheets-Editor.
+- Eine `.xlsx`- oder `.xlsm`-Datei öffnen: Sie erscheint direkt im Sheets-Editor.
 - Eine `.csv`- oder `.tsv`-Datei im Explorer rechts anklicken und **Mit Sheets öffnen** wählen. Alternativ **Öffnen mit… → Sheets (CSV)** verwenden.
 - Über die Befehlspalette **Sheets: Tabellendatei öffnen…** eine Datei auswählen oder mit **Sheets: Neue Arbeitsmappe** eine neue XLSX-Datei anlegen.
 - Mit `Ctrl+S` / `Cmd+S` speichern. Rückgängig und Wiederholen sind mit VS Code verbunden.
@@ -40,21 +40,27 @@ Falls XLSX weiterhin in einem anderen Editor öffnet: Nach der Installation **De
 
 ## Funktionen
 
-- Zellen bearbeiten, kopieren, einfügen und automatisch ausfüllen; Zeilen, Spalten und Blätter verwalten.
+- Zellen bearbeiten, kopieren, einfügen und automatisch ausfüllen; Zeilen, Spalten und Blätter verwalten, aus- und einblenden (`Ctrl+9` / `Ctrl+0`, mit Shift einblenden).
+- Inhalte einfügen: nur Werte (`Ctrl+Shift+V`), Formeln oder Formate, Leerzellen überspringen und Transponieren (`Ctrl+Alt+V`).
+- Suchen und Ersetzen (`Ctrl+F` / `Ctrl+H`, auf macOS `Cmd+F` / `Cmd+Option+F`) im Blatt oder in der ganzen Mappe, auch in Formeln und mit regulären Ausdrücken.
+- Gehe zu Zelle, Bereich oder Name (`Ctrl+G` / `Cmd+G`) und Zoom von 25 % bis 400 % (`Ctrl`+Mausrad, Zoomregler in der Statusleiste).
 - Zahlen-, Währungs-, Prozent-, Datums- und eigene Zellformate; Schrift, Farben, Rahmen und Ausrichtung. Zellformatierung über `Ctrl+1` / `Cmd+1`.
-- Tabellen hervorheben, komplette Datensätze sortieren und über die Kopfzeilen nach Werten filtern. Wertefilter bieten Suche, Mehrfachauswahl und leere Werte.
-- Formeln mit über 130 Funktionen, darunter `XLOOKUP`, `PMT`, `FILTER`, `SORT`, `UNIQUE` und `SEQUENCE`; Vorschläge und farbige Zellreferenzen während der Eingabe.
-- Bedingte Formatierung mit Zellvergleichen, Formelregeln und Farbskalen.
+- Tabellen hervorheben, komplette Datensätze sortieren und über die Kopfzeilen nach Werten filtern. Wertefilter bieten Suche, Mehrfachauswahl und leere Werte. Strukturierte Verweise wie `Tabelle1[Umsatz]` oder `[@Menge]` funktionieren in Formeln.
+- Formeln mit über 200 Funktionen, darunter `XLOOKUP`, `FILTER`, `SORTBY`, `LET`, `LAMBDA`, `MAP`, `REDUCE`, `VSTACK`, `TEXTSPLIT`, `XIRR` und `AGGREGATE`; Vorschläge und farbige Zellreferenzen während der Eingabe.
+- Datenüberprüfung mit Dropdown-Listen, Zahlen-, Datums- und Textlängengrenzen sowie eigenen Formeln, Eingabe- und Fehlermeldungen.
+- Bedingte Formatierung mit Zellvergleichen, Formelregeln, Farbskalen, Datenbalken und Symbolsätzen.
+- Notizen werden angezeigt, Hyperlinks und `HYPERLINK`-Formeln öffnen sich mit `Ctrl`/`Cmd`+Klick.
 - Säulen-, Balken-, Linien-, Flächen-, Kreis-, Ring- und Punktdiagramme erstellen und bearbeiten.
 - Pivot-Auswertungen mit Gruppen, Aggregaten und Gesamtsummen erstellen und aktualisieren.
-- Excel-Tabellen, Zellformate, Diagramme und Wertefilter in XLSX speichern. CSV-Trennzeichen bleiben beim Speichern erhalten.
+- Excel-Tabellen, Zellformate, Diagramme und Wertefilter in XLSX speichern. CSV-Trennzeichen bleiben beim Speichern erhalten. **Sheets: Blatt als CSV exportieren…** schreibt das aktive Blatt in eine CSV- oder TSV-Datei.
+- Lässt sich eine Änderung nicht verlustfrei als XLSX speichern, zeigt der Editor das sofort über der Tabelle an, nicht erst beim Speichern.
 - Helles und dunkles VS-Code-Theme sowie fixierte Zeilen und Spalten.
 
 ## KI-Agents
 
 Im Copilot-Chat **Agent** wählen und unter **Configure Tools / Werkzeuge konfigurieren** die Sheets-Werkzeuge aktivieren. Für Agent Mode eine aktuelle VS-Code-Version verwenden (Extension-Werkzeuge werden dort seit VS Code 1.99 unterstützt).
 
-Sheets registriert 41 Werkzeuge (`sheets_*`) für Clients, die die VS-Code-Language-Model-Tools unterstützen, beispielsweise Copilot im Agent-Modus. Sie können Bereiche lesen und schreiben, Formeln und Formate anwenden, Tabellen und Diagramme erstellen oder sortieren.
+Sheets registriert 45 Werkzeuge (`sheets_*`) für Clients, die die VS-Code-Language-Model-Tools unterstützen, beispielsweise Copilot im Agent-Modus. Sie können Bereiche lesen und schreiben, suchen und ersetzen, Formeln und Formate anwenden, Tabellen, Diagramme und Datenüberprüfungen anlegen, Zeilen ausblenden oder sortieren.
 
 Änderungen an geöffneten Dateien erscheinen im Editor und lassen sich rückgängig machen. Die Einstellung `sheets.agentTools.headlessWrites` erlaubt zusätzlich Änderungen an ungeöffneten Dateien, die direkt gespeichert werden. Diese Funktion erfordert einen vertrauenswürdigen Arbeitsbereich. Für die manuelle Tabellenbearbeitung wird kein KI-Konto benötigt.
 
@@ -72,9 +78,9 @@ Die Tabellenverarbeitung läuft lokal. Die Extension sendet selbst keine Tabelle
 
 ## Unterstützte Formate und Grenzen
 
-Unterstützt werden `.xlsx`, `.csv` und `.tsv`. Makros und das alte `.xls`-Format werden nicht unterstützt. CSV/TSV können nur Werte eines Blatts speichern, keine Formatierung oder Diagramme.
+Unterstützt werden `.xlsx`, `.xlsm`, `.csv` und `.tsv`. In `.xlsm`-Dateien bleiben Makros erhalten, werden aber nie ausgeführt. Das alte `.xls`-Format wird nicht unterstützt. CSV/TSV können nur Werte eines Blatts speichern, keine Formatierung oder Diagramme.
 
-Nicht alle Excel-Funktionen werden im Editor dargestellt oder bearbeitet. Dazu gehören native Pivot-Caches, strukturierte Tabellenreferenzen, Datenüberprüfung, Bilder und Kommentare. Eingebaute Excel-Tabellenstile werden im Editor teilweise näherungsweise blau dargestellt; der ursprüngliche Stil bleibt in der Datei erhalten.
+Nicht alle Excel-Funktionen werden im Editor dargestellt oder bearbeitet. Dazu gehören native Pivot-Caches und Bilder; Notizen werden nur angezeigt, nicht bearbeitet. Eingebaute Excel-Tabellenstile werden im Editor teilweise näherungsweise blau dargestellt; der ursprüngliche Stil bleibt in der Datei erhalten.
 
 Beim Speichern bleibt das Originalpaket die Grundlage. Nicht implementierte Bestandteile werden mitgeführt. Ohne Änderung wird die Datei bytegenau zurückgegeben. Änderungen, die sich nicht sicher übertragen lassen – etwa Struktur- oder Sortieränderungen mit unbekannten Excel-Inhalten –, werden vor dem Überschreiben mit einer Fehlermeldung blockiert. Wiederherstellungssicherungen behalten auch solche ungespeicherten Änderungen. Details: [XLSX-Kompatibilität und Speicherschutz](docs/xlsx-compatibility.md).
 

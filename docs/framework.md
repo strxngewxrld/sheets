@@ -37,7 +37,7 @@ Workspace-Pakete werden über die Export-Bedingung `source` direkt aus den TypeS
 
 High-Level-Befehle in `commands.ts` (Eingabe, Formatieren, Kopieren/Einfügen, Ausfüllen, Sortieren, Diagramme, Suche) bauen auf diesen Operationen auf. UI und Agent verwenden dieselben Befehle.
 
-**Formel-Engine:** Tokenizer → Pratt-Parser (Excel-Präzedenz) → Evaluator mit Array-Broadcasting. Über 130 Funktionen (Mathe, Statistik, Finanzmathematik, Logik, Lookup inkl. `XLOOKUP`, Text, Datum). Ein Abhängigkeitsgraph sorgt dafür, dass nach einer Änderung die betroffenen Zellen neu berechnet werden. Mappen mit dynamischen Arrays werden vollständig neu berechnet, damit auch veränderte Überlaufbereiche und deren Abhängigkeiten berücksichtigt werden. Zirkelbezüge ergeben `#CIRC!`. Bei Formeln mit unbekannten Funktionen bleibt der in der Datei gespeicherte Wert von Excel erhalten.
+**Formel-Engine:** Tokenizer → Pratt-Parser (Excel-Präzedenz) → Evaluator mit Array-Broadcasting. Über 200 Funktionen (Mathe, Statistik, Finanzmathematik, Logik, Lookup inkl. `XLOOKUP`, Text, Datum) sowie `LET`/`LAMBDA` mit `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN` und `MAKEARRAY`. Strukturierte Tabellenverweise (`Tabelle1[Spalte]`, `[@Spalte]`, `Tabelle1[#Alle]`) werden gegen die Tabellen der Mappe aufgelöst und in XLSX in der von Excel erwarteten Form gespeichert. Ein Abhängigkeitsgraph sorgt dafür, dass nach einer Änderung die betroffenen Zellen neu berechnet werden. Mappen mit dynamischen Arrays werden vollständig neu berechnet, damit auch veränderte Überlaufbereiche und deren Abhängigkeiten berücksichtigt werden. Zirkelbezüge ergeben `#CIRC!`. Bei Formeln mit unbekannten Funktionen bleibt der in der Datei gespeicherte Wert von Excel erhalten.
 
 **xlsx:** eigener Reader und Writer, kein SheetJS/ExcelJS. Unterstützt werden Werte, Formeln (inkl. Shared Formulas, `_xlfn.`-Präfixe), Styles (Schrift, Farben inkl. Theme/Tint, Füllung, Rahmen, Ausrichtung, Zahlenformate), Spaltenbreiten und Zeilenhöhen, verbundene Zellen, fixierte Bereiche, definierte Namen und **native Excel-Diagramme** (Säule, Balken, Linie, Fläche, Kreis, Ring, Punkt), lesend und schreibend. Mit openpyxl in beide Richtungen gegengeprüft.
 
@@ -176,7 +176,7 @@ const result = agent.execute('fill_formula', { range: 'D2:D100', formula: '=B2*C
 // → { ok: true, result: { filled: 'Sheet1!D2:D100', cells: 99, sample: [...] } }
 ```
 
-41 Tools, unter anderem: `get_workbook_info`, `read_range` (JSON/Markdown), `write_range`, `fill_formula`, `format_range`, `sort_range`, `copy_range`, `find`, `evaluate_formula`, `inspect_cell` (Vorgänger/Nachfolger), `create_chart`/`update_chart`/`list_charts`, Zeilen/Spalten/Blätter, `freeze_panes`, `define_name`, `undo`/`redo`. Hinzu kommen `format_table`/`list_tables`/`remove_table`, `set_conditional_formats`/`list_conditional_formats` und `create_pivot_table`/`refresh_pivot_table`/`list_pivot_tables`/`remove_pivot_table`.
+45 Tools, unter anderem: `get_workbook_info`, `read_range` (JSON/Markdown), `write_range`, `fill_formula`, `format_range`, `sort_range`, `copy_range`, `find`, `evaluate_formula`, `inspect_cell` (Vorgänger/Nachfolger), `create_chart`/`update_chart`/`list_charts`, Zeilen/Spalten/Blätter, `freeze_panes`, `define_name`, `undo`/`redo`. Hinzu kommen `format_table`/`list_tables`/`remove_table`, `set_conditional_formats`/`list_conditional_formats` und `create_pivot_table`/`refresh_pivot_table`/`list_pivot_tables`/`remove_pivot_table`, `replace`, `set_hidden` sowie `set_data_validation`/`list_data_validations`.
 
 Jeder Tool-Aufruf wird ein einzelner Undo-Schritt mit `origin: 'agent'`. Nutzer können also nachvollziehen und rückgängig machen, was ein Agent geändert hat. Fehler kommen als `{ ok: false, error }` mit einer Meldung, die ein Modell verstehen kann.
 
@@ -204,16 +204,17 @@ npm run build      # oder: npm run package → artifacts/*.vsix
 code --extensionDevelopmentPath=$PWD
 ```
 
-- `.xlsx` öffnen standardmäßig im Sheets-Editor, `.csv`/`.tsv` über „Öffnen mit…“ bzw. Kontextmenü → *Open with Sheets*.
+- `.xlsx` und `.xlsm` öffnen standardmäßig im Sheets-Editor, `.csv`/`.tsv` über „Öffnen mit…“ bzw. Kontextmenü → *Open with Sheets*.
 - Speichern, Undo/Redo, Dirty-Status und Wiederherstellen nach Absturz laufen über VS Code. Beim Speichern einer CSV bleibt das erkannte Trennzeichen erhalten.
 - **Language-Model-Tools** (`sheets_*`) stehen z. B. dem Copilot-Agent-Modus zur Verfügung. Ist die Datei geöffnet, wirkt die Änderung sofort im Editor und lässt sich rückgängig machen. Sonst wird die Datei geladen, geändert und gespeichert (abschaltbar über `sheets.agentTools.headlessWrites`).
 - Andere Extensions nutzen `vscode.commands.executeCommand('sheets.executeTool', { name, input, file })` oder die API, die `activate()` zurückgibt.
 
 ## Bekannte Grenzen / nächste Schritte
 
-- Native Excel-Pivot-Caches, Datenüberprüfung, Bilder und Kommentare fehlen noch.
-- Bedingte Formatierung unterstützt Zellvergleiche, Formelregeln und Min/Max-Farbskalen mit optionaler 50%-Mitte. Datenbalken, Symbolsätze, Perzentil-Schwellen und andere Regeltypen werden noch nicht importiert oder dargestellt.
-- Dynamische Arrays rechnen die Mappe vollständig neu; `SEQUENCE` und Pivot-Auswertungen sind auf eine Million Zellen begrenzt. Strukturierte Tabellenreferenzen und der implizite Schnittmengenoperator `@` fehlen noch.
+- Native Excel-Pivot-Caches und Bilder fehlen noch. Notizen und Hyperlinks werden gelesen und angezeigt, aber im Editor nicht bearbeitet.
+- Bedingte Formatierung unterstützt Zellvergleiche, Formelregeln, Min/Max-Farbskalen mit optionaler 50%-Mitte, Datenbalken und Symbolsätze. Excel-2010-Erweiterungen (z. B. negative Datenbalken) und andere Regeltypen werden noch nicht importiert oder dargestellt.
+- Dynamische Arrays rechnen die Mappe vollständig neu; `SEQUENCE` und Pivot-Auswertungen sind auf eine Million Zellen begrenzt. Der implizite Schnittmengenoperator `@` außerhalb von Tabellenverweisen fehlt noch; eine Tabelle wächst beim Tippen in die Nachbarspalte nicht automatisch mit.
+- Zeilen einfügen/löschen und Sortieren werden bei XLSX-Dateien mit nicht vollständig modellierten Inhalten weiterhin blockiert, da dafür alle abhängigen Teile im Original-XML verschoben werden müssten.
 - Beim Löschen von Zeilen/Spalten oder Blättern speichert Undo eine Kopie der ganzen Mappe. Für sehr große Dateien sollte das durch gezielte Umkehr-Operationen ersetzt werden.
 - Abhängigkeiten von Bereichen werden linear durchsucht; für sehr viele Bereichsformeln wäre ein Intervall-Index sinnvoll.
 - Das Datumssystem 1904 wird beim Import nicht umgerechnet.

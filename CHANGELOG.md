@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Formulas: `LET`, `LAMBDA` (also via defined names), `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`, `MAKEARRAY`, `ISOMITTED`, `VSTACK`, `HSTACK`, `TAKE`, `DROP`, `CHOOSEROWS`, `CHOOSECOLS`, `TOCOL`, `TOROW`, `WRAPROWS`, `WRAPCOLS`, `EXPAND`, `SORTBY`, `TEXTSPLIT`, `TEXTBEFORE`, `TEXTAFTER`, `IRR`, `XIRR`, `RATE`, `AGGREGATE` and `HYPERLINK`.
+- Structured table references (`Table1[Col]`, `[@Col]`, `Table1[#All]`, ...), stored in Excel's qualified form.
+- Find and replace, go to cell, zoom (25-400 %), hide/unhide rows and columns, paste values and paste special (formulas, formats, skip blanks, transpose).
+- `SUBTOTAL` skips rows hidden by filters (and 101-111 also manually hidden rows); `AGGREGATE` can ignore errors and hidden rows.
+- Data validation: dropdown lists, number/date/time/text length limits and custom formulas with input and error messages; read, written and patched in preserved XLSX files.
+- Conditional formatting: data bars and all Excel icon sets.
+- Notes and hyperlinks are shown; links and `HYPERLINK` formulas open with Ctrl/Cmd+click.
+- `.xlsm` workbooks open in Sheets; macros are kept but never run.
+- "Export Sheet as CSV…" command and an in-editor warning when changes could not be saved as XLSX without loss.
+- New agent tools: `replace`, `set_hidden`, `set_data_validation`, `list_data_validations`; `copy_range` can transpose and skip blanks.
+- Much faster reading and saving of large workbooks (e.g. reading 1M cells ~10 s instead of ~44 s, saving a one-cell edit ~15 s instead of ~53 s).
+- Fix: hidden checkbox rows in dialogs stayed visible.
+
 ## 0.2.3
 
 - Explicitly associate XLSX files with Sheets as the default editor.

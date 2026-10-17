@@ -12,9 +12,11 @@ Ein vollständiger Neuaufbau ist nur zulässig, wenn das Original nachweislich e
 
 | Bestandteil | Verhalten beim Speichern |
 | --- | --- |
-| Bilder, Zeichnungen, Kommentare, VML | Originalteile und Verknüpfungen bleiben erhalten; keine Bearbeitung dieser Inhalte im Editor. |
+| Bilder, Zeichnungen, Kommentare, VML | Originalteile und Verknüpfungen bleiben erhalten. Notizen (Kommentare) und Hyperlinks werden gelesen und angezeigt, aber nicht bearbeitet. |
 | Native Pivot-Definitionen und Pivot-Caches | Originalteile bleiben erhalten. Wertänderungen in erkannten Pivot-Ausgabebereichen werden blockiert. |
-| Datenüberprüfung, erweiterte bedingte Formate | Unverändertes XML bleibt erhalten. Änderungen der Regeldefinitionen sind bei nicht vollständig modellierten Dateien blockiert. |
+| Datenüberprüfung | Wird gelesen und bearbeitet. Geänderte Regeln ersetzen gezielt nur das `<dataValidations>`-Element. Enthält das Blatt zusätzlich Excel-2010-Regeln in `extLst`, werden Änderungen blockiert. |
+| Erweiterte bedingte Formate | Datenbalken und Symbolsätze werden gelesen und dargestellt. Unverändertes XML bleibt erhalten; Änderungen der Regeldefinitionen sind bei nicht vollständig modellierten Dateien blockiert. |
+| Makros (`.xlsm`) | `vbaProject.bin` und alle übrigen Teile bleiben erhalten; Makros werden nie ausgeführt. Neue `.xlsm`-Dateien erhalten den makrofähigen Content-Type. |
 | Native Tabellen und Excel-Tabellenstile | Originaldefinitionen bleiben erhalten. Änderungen von Kopfzeilen, berechneten Spalten, Summenzeilen oder Tabellen-Metadaten werden bei nicht sicher übertragbaren Dateien blockiert. |
 | Unbekannte Formeln, Shared/Array-/Datentabellen-Metadaten | Unveränderte Formeln und ihre gespeicherten Ergebnisse bleiben erhalten. Änderungen komplexer Formelstrukturen und ihrer abhängigen Ausgabebereiche werden blockiert. |
 | Berechnungskette | Bleibt erhalten. Änderungen am Formelgraphen mit vorhandener Kette werden blockiert. |
@@ -30,7 +32,7 @@ Die Neuberechnung im Editor unterstützt weiterhin nur die implementierten Forme
 
 ## Speichern, Wiederherstellen und Konflikte
 
-Eine Fehlermeldung des Writers tritt auf, bevor die Extension oder der MCP-Server die Zieldatei schreibt. Das gilt auch für Agent-Werkzeuge. „Speichern unter“ umgeht den XLSX-Schutz nicht.
+Der Editor prüft nach jeder Änderung im Hintergrund, ob sie sich noch verlustfrei speichern lässt, und zeigt andernfalls den Grund über der Tabelle an. Eine Fehlermeldung des Writers tritt auf, bevor die Extension oder der MCP-Server die Zieldatei schreibt. Das gilt auch für Agent-Werkzeuge. „Speichern unter“ umgeht den XLSX-Schutz nicht.
 
 VS Code legt Wiederherstellungssicherungen als separates JSON-Format ab. Dadurch bleiben ungespeicherte Änderungen samt Originalarchiv erhalten, selbst wenn sie sich derzeit nicht verlustfrei als XLSX speichern lassen. Nach dem Wiederherstellen gelten dieselben Schutzprüfungen. Alte Sicherungen ohne nachweisbare Dateiversion können nur in eine neue Datei gespeichert werden.
 
