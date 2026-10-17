@@ -149,6 +149,24 @@ describe('lossless XLSX preservation', () => {
     expect(readXlsx(writeXlsx(wb)).activeSheet.tables[0]?.range).toBe('A1:B3');
   });
 
+  it('protects array output in other rows without parsing unchanged rows', () => {
+    const base = new Workbook();
+    setValues(base, 0, 0, 0, [['x', 1], ['y', 2], ['z', 3], ['w', 4]]);
+    const parts = unzipSync(writeXlsx(base));
+    const sheet = strFromU8(parts['xl/worksheets/sheet1.xml']!);
+    parts['xl/worksheets/sheet1.xml'] = strToU8(sheet
+      .replace(/<c r="B1"[^]*?<\/c>/, '<c r="B1"><f t="array" ref="B1:B3">_xlfn.UNIMPLEMENTED(A1)</f><v>1</v></c>')
+      .replace(/<c r="B4"[^]*?<\/c>/, '<c r="B4"><f t="array">_xlfn.UNIMPLEMENTED(A4)</f><v>4</v></c>'));
+    const bytes = zipSync(parts);
+    for (const [row, blocked] of [[2, true], [3, true], [3, false]] as const) {
+      const wb = readXlsx(bytes);
+      if (blocked) setCellInput(wb, 0, row, 1, '9');
+      else setCellInput(wb, 0, row, 0, 'changed');
+      if (blocked) expect(() => writeXlsx(wb)).toThrow(/Matrixformel/);
+      else expect(readXlsx(writeXlsx(wb)).getValue(0, 3, 0)).toBe('changed');
+    }
+  });
+
   it('retains unsupported formula XML and rejects edits to array members and signed files', () => {
     const { parts } = fixture();
     parts['xl/worksheets/sheet1.xml'] = strToU8(strFromU8(parts['xl/worksheets/sheet1.xml']!).replace('<c r="B3"><f>B2*2</f><v>20</v></c>', '<c r="B3"><f t="array" ref="B3:C3">_xlfn.UNIMPLEMENTED(B2)</f><v>123</v></c><c r="C3"><v>456</v></c>'));

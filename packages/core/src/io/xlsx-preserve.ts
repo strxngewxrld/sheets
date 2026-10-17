@@ -129,6 +129,30 @@ function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before:
   return result;
 }
 
+/**
+ * Ranges of array formulas and data tables in <sheetData>, found by scanning
+ * the text so cells of unchanged rows need not be parsed.
+ */
+function arrayRanges(xml: string, data: XmlSpan, p: string): ReturnType<typeof parseRange>[] {
+  const out: ReturnType<typeof parseRange>[] = [];
+  const body = xml.slice(data.openEnd, data.closeStart);
+  const formula = new RegExp(`^<${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}f[\\s/>]`);
+  const type = /\st\s*=\s*(["'])(?:array|dataTable)\1/g;
+  for (let m; (m = type.exec(body));) {
+    const lt = body.lastIndexOf('<', m.index);
+    const tag = body.slice(lt, body.indexOf('>', m.index) + 1);
+    if (!formula.test(tag)) continue;
+    const ref = attribute(tag, 'ref');
+    if (ref) { out.push(parseRange(ref)); continue; }
+    // Without a ref the formula covers its own cell.
+    const cellStart = Math.max(body.lastIndexOf(`<${p}c `, lt), body.lastIndexOf(`<${p}c>`, lt));
+    const address = cellStart >= 0 ? attribute(body.slice(cellStart, body.indexOf('>', cellStart) + 1), 'r') : undefined;
+    if (!address) protect('Matrixformel ohne Zelladresse.');
+    out.push(parseRange(address));
+  }
+  return out;
+}
+
 function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][number], after: WorkbookData['sheets'][number], styles: PreservedStyles | undefined, date1904: boolean, hasCalcChain: boolean, richStrings: { has(index: number): boolean }, lockedRanges: string[]): string {
   const changes = [...new Set([...Object.keys(before.cells), ...Object.keys(after.cells)])]
     .filter((key) => !sameValue([payload(before.cells[key]), before.cells[key]?.s], [payload(after.cells[key]), after.cells[key]?.s]));
@@ -138,27 +162,15 @@ function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][n
   if (child(root, 'sheetProtection')) protect(`Blattschutz in ${before.name}.`);
   const data = child(root, 'sheetData'); if (!data) protect('sheetData fehlt.');
   const rows = new Map<number, XmlSpan>(), cells = new Map<string, XmlSpan>();
-  const arrays: ReturnType<typeof parseRange>[] = [];
   let rowIndex = -1;
-  for (const row of data.children.filter((n) => n.name === 'row')) {
+  for (const row of data.children) {
+    if (row.name !== 'row') continue;
     if (row.qname !== p + 'row') protect('Nicht unterstützter Zeilen-Namensraum.');
     rowIndex = Number(nodeAttribute(xml, row, 'r') ?? rowIndex + 2) - 1;
     if (rows.has(rowIndex)) protect('Doppelte Zeilenadresse.');
     rows.set(rowIndex, row);
-    let col = -1;
-    for (const c of row.children.filter((n) => n.name === 'c')) {
-      if (c.qname !== p + 'c') protect('Nicht unterstützter Zell-Namensraum.');
-      const address = nodeAttribute(xml, c, 'r');
-      const a = address ? parseAddress(address) : { row: rowIndex, col: col + 1 };
-      if (!a || a.row !== rowIndex) protect('Ungültige Zelladresse.');
-      col = a.col;
-      const ref = formatAddress(a.row, a.col);
-      if (cells.has(ref)) protect('Doppelte Zelladresse.');
-      cells.set(ref, c);
-      const f = child(c, 'f');
-      if (f && ['array', 'dataTable'].includes(nodeAttribute(xml, f, 't') ?? '')) arrays.push(parseRange(nodeAttribute(xml, f, 'ref') ?? ref));
-    }
   }
+  const arrays = arrayRanges(xml, data, p);
   const changedRows = new Map<number, string[]>();
   for (const ref of changes) {
     const a = parseAddress(ref); if (!a) protect('Ungültige Zelladresse im Modell.');
@@ -177,6 +189,24 @@ function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][n
       }
     }
     const list = changedRows.get(a.row) ?? []; list.push(ref); changedRows.set(a.row, list);
+  }
+  // Cells are resolved only in rows that change; other rows are copied unchanged.
+  for (const index of changedRows.keys()) {
+    const row = rows.get(index);
+    if (!row) continue;
+    const rowXml = raw(xml, row);
+    row.children = xmlRoot(rowXml, 2).children.map((c) => ({ ...c, start: c.start + row.start, openEnd: c.openEnd + row.start, closeStart: c.closeStart + row.start, end: c.end + row.start }));
+    let col = -1;
+    for (const c of row.children.filter((n) => n.name === 'c')) {
+      if (c.qname !== p + 'c') protect('Nicht unterstützter Zell-Namensraum.');
+      const address = nodeAttribute(xml, c, 'r');
+      const a = address ? parseAddress(address) : { row: index, col: col + 1 };
+      if (!a || a.row !== index) protect('Ungültige Zelladresse.');
+      col = a.col;
+      const ref = formatAddress(a.row, a.col);
+      if (cells.has(ref)) protect('Doppelte Zelladresse.');
+      cells.set(ref, c);
+    }
   }
   const rowEdits: XmlEdit[] = [], insertedRows = new Map<number, string>();
   for (const [index, refs] of [...changedRows].sort(([a], [b]) => a - b)) {
@@ -314,10 +344,10 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
       }
     }
     if (sameValue(before, after)) continue;
-    const originalRoot = xmlRoot(originalSheet);
+    const originalRoot = xmlRoot(originalSheet, 3);
     if (child(originalRoot, 'sheetProtection')) protect(`Blattschutz in ${before.name}.`);
     const patched = patchValidations(patchLayout(patchSheet(originalSheet, originalRoot, before, after, styles, date1904, wbRels.some((r) => r.type.endsWith('/calcChain')), richStrings, lockedRanges), before, after), before, after);
-    if (patched !== originalSheet) { xmlRoot(patched); files[entry.rel.target] = strToU8(patched); }
+    if (patched !== originalSheet) { xmlRoot(patched, 1); files[entry.rel.target] = strToU8(patched); }
   }
   if (stylesPath && styles) { xmlRoot(styles.xml); files[stylesPath] = strToU8(styles.xml); }
   // Preserve the original formula caches and calculation chain. Excel refreshes

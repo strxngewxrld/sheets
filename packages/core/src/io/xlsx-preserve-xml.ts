@@ -12,8 +12,12 @@ export function protect(reason: string): never {
   throw new Error(`XLSX-Schutz: ${reason} Diese Änderung kann noch nicht verlustfrei gespeichert werden. Die Originaldatei wurde nicht überschrieben.`);
 }
 
-/** Retain byte spans rather than parsing/rebuilding unknown XML. */
-export function xmlRoot(xml: string): XmlSpan {
+/**
+ * Retain byte spans rather than parsing/rebuilding unknown XML. The whole
+ * document is validated and its nesting checked; spans are only created down
+ * to `maxDepth` (1 = root only), which keeps large worksheets cheap.
+ */
+export function xmlRoot(xml: string, maxDepth = Infinity): XmlSpan {
   if (/<!DOCTYPE/i.test(xml) || XMLValidator.validate(xml) !== true) protect('Nicht unterstützte oder ungültige XML-Struktur.');
   const stack: XmlSpan[] = [];
   let root: XmlSpan | undefined;
@@ -40,9 +44,10 @@ export function xmlRoot(xml: string): XmlSpan {
       node.closeStart = i; node.end = end + 1;
     } else {
       const node: XmlSpan = { name: qname.split(':').at(-1)!, qname, start: i, openEnd: end + 1, closeStart: end + 1, end: end + 1, children: [] };
-      if (stack.length) stack.at(-1)!.children.push(node);
-      else { if (root) protect('Mehrere XML-Wurzelelemente.'); root = node; }
-      if (!/\/\s*>$/.test(token)) stack.push(node);
+      // Elements below maxDepth are tracked for nesting only and not attached to the tree.
+      if (stack.length && stack.length < maxDepth) stack.at(-1)!.children.push(node);
+      else if (!stack.length) { if (root) protect('Mehrere XML-Wurzelelemente.'); root = node; }
+      if (token[token.length - 2] !== '/') stack.push(node);
     }
     i = end + 1;
   }
