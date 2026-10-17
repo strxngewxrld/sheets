@@ -13,6 +13,8 @@ import {
   formatRange,
   formatValue,
   formatTable,
+  hideCols,
+  hideRows,
   insertChartFromRange,
   isError,
   keyToAddress,
@@ -27,11 +29,14 @@ import {
   removePivotTable,
   removeChart,
   removeTable,
+  replaceCells,
   resolveChart,
   setValues,
   setConditionalFormats,
   shiftFormula,
   sortRange,
+  unhideCols,
+  unhideRows,
   unmergeCells,
   updateChart,
   walk,
@@ -665,6 +670,8 @@ export const TOOLS: ToolImpl[] = [
         destination: { type: 'string', description: 'Top-left target cell, optionally sheet-qualified ("Sheet2!A1")' },
         mode: { type: 'string', enum: ['all', 'values', 'formats', 'formulas'], default: 'all' },
         move: { type: 'boolean', description: 'Cut instead of copy', default: false },
+        transpose: { type: 'boolean', description: 'Swap rows and columns', default: false },
+        skip_blanks: { type: 'boolean', description: 'Keep destination cells where the source is empty', default: false },
       },
       required: ['source', 'destination'],
     },
@@ -676,7 +683,8 @@ export const TOOLS: ToolImpl[] = [
       const clipData = copyRange(ctx.wb, src.name, rangeOf(srcText));
       if (input.move) clipData.cut = true;
       const start = cellOf(dstText);
-      const pasted = pasteRange(ctx.wb, clipData, dst.name, { start, end: start }, (optStr(input, 'mode') ?? 'all') as 'all');
+      const mode = (optStr(input, 'mode') ?? 'all') as 'all';
+      const pasted = pasteRange(ctx.wb, clipData, dst.name, { start, end: start }, { mode, transpose: !!input.transpose, skipBlanks: !!input.skip_blanks });
       return { pasted: formatRange(pasted, dst.name) };
     },
   },
@@ -707,6 +715,37 @@ export const TOOLS: ToolImpl[] = [
       if (input.case_sensitive) opts.caseSensitive = true;
       const results = findCells(ctx.wb, str(input, 'query'), opts);
       return { count: results.length, matches: results.map((r) => ({ sheet: r.sheet, cell: r.address, value: jsonValue(r.value), display: r.display, ...(r.formula ? { formula: r.formula } : {}) })) };
+    },
+  },
+  {
+    name: 'replace',
+    description: 'Finds and replaces text like Excel\'s Replace dialog. Constants are changed in their content; formulas only with in_formulas. All changes are one undo step.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        replacement: { type: 'string', description: 'Replacement text; with regex, $1 etc. refer to groups' },
+        sheet: { type: 'string', description: 'Restrict to one sheet' },
+        range: { type: 'string', description: 'Restrict to a range of the sheet(s), e.g. "A1:D20"' },
+        regex: { type: 'boolean', default: false },
+        in_formulas: { type: 'boolean', default: false },
+        whole_cell: { type: 'boolean', default: false },
+        case_sensitive: { type: 'boolean', default: false },
+      },
+      required: ['query', 'replacement'],
+    },
+    run: (ctx, input) => {
+      const sheet = optStr(input, 'sheet');
+      const range = optStr(input, 'range');
+      const count = replaceCells(ctx.wb, str(input, 'query'), str(input, 'replacement'), {
+        ...(sheet ? { sheet } : {}),
+        ...(range ? { range: rangeOf(range) } : {}),
+        ...(input.regex ? { regex: true } : {}),
+        ...(input.in_formulas ? { inFormulas: true } : {}),
+        ...(input.whole_cell ? { wholeCell: true } : {}),
+        ...(input.case_sensitive ? { caseSensitive: true } : {}),
+      });
+      return { replaced: count };
     },
   },
   {
@@ -906,6 +945,43 @@ export const TOOLS: ToolImpl[] = [
       for (let r = Math.min(from, to); r <= Math.max(from, to); r++) sizes.push({ index: r, size: height });
       ctx.wb.apply({ type: 'setRowHeights', sheet: sheet.name, sizes });
       return { ok: true };
+    },
+  },
+  {
+    name: 'set_hidden',
+    description: 'Hides or shows rows or columns, e.g. rows "2:5" or columns "C:D". Hidden rows are skipped by SUBTOTAL(101-111).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sheet: SHEET_PARAM,
+        rows: { type: 'string', description: 'e.g. "3" or "2:10"' },
+        columns: { type: 'string', description: 'e.g. "B" or "C:F"' },
+        hidden: { type: 'boolean', default: true },
+      },
+      required: ['hidden'],
+    },
+    run: (ctx, input) => {
+      const sheet = sheetOf(ctx, input);
+      const hidden = input.hidden !== false;
+      const rows = optStr(input, 'rows');
+      const cols = optStr(input, 'columns');
+      if (!rows && !cols) throw new ToolInputError('Pass "rows" and/or "columns".');
+      ctx.wb.transaction(() => {
+        if (rows) {
+          const [a, b = a] = rows.split(':') as [string, string?];
+          const [from, to] = [rowIndex(a), rowIndex(b)].sort((x, y) => x - y) as [number, number];
+          (hidden ? hideRows : unhideRows)(ctx.wb, sheet.name, from, to);
+        }
+        if (cols) {
+          const [a, b = a] = cols.split(':') as [string, string?];
+          const [from, to] = [columnIndex(a), columnIndex(b!)].sort((x, y) => x - y) as [number, number];
+          (hidden ? hideCols : unhideCols)(ctx.wb, sheet.name, from, to);
+        }
+      });
+      return {
+        hidden_rows: [...sheet.rowHeights].filter(([, h]) => h === 0).map(([r]) => r + 1).sort((x, y) => x - y),
+        hidden_columns: [...sheet.colWidths].filter(([, w]) => w === 0).map(([c]) => colToName(c)).sort(),
+      };
     },
   },
   {

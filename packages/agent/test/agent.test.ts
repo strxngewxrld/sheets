@@ -126,3 +126,21 @@ describe('SpreadsheetAgent', () => {
     expect(wb.activeSheet.tables).toHaveLength(1);
   });
 });
+
+describe('replace, visibility and paste options', () => {
+  it('replaces text, hides rows and transposes copies through tools', () => {
+    const wb = new Workbook();
+    const agent = new SpreadsheetAgent(wb);
+    expect(agent.execute('write_range', { start: 'A1', values: [['red', 1], ['blue', 2], ['red', 3], ['=SUBTOTAL(109,B1:B3)', null]] }).ok).toBe(true);
+    expect(agent.execute('replace', { query: 'red', replacement: 'green' }).result).toEqual({ replaced: 2 });
+    expect(wb.getValue(0, 2, 0)).toBe('green');
+    const hidden = agent.execute('set_hidden', { rows: '2', columns: 'C:D', hidden: true });
+    expect(hidden.result).toEqual({ hidden_rows: [2], hidden_columns: ['C', 'D'] });
+    expect(wb.getValue(0, 3, 0)).toBe(4);
+    expect(agent.execute('set_hidden', { rows: '1:3', hidden: false }).ok).toBe(true);
+    expect(wb.getValue(0, 3, 0)).toBe(6);
+    expect(agent.execute('set_hidden', { hidden: true }).ok).toBe(false);
+    expect(agent.execute('copy_range', { source: 'A1:B2', destination: 'F1', transpose: true }).result).toEqual({ pasted: 'Sheet1!F1:G2' });
+    expect([wb.getValue(0, 0, 5), wb.getValue(0, 0, 6), wb.getValue(0, 1, 5), wb.getValue(0, 1, 6)]).toEqual(['green', 'blue', 1, 2]);
+  });
+});
