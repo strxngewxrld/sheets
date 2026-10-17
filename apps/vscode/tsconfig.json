@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist-types", "emitDeclarationOnly": true, "types": ["node", "vscode"] },
+  "include": ["src"],
+  "references": [{ "path": "../../packages/core" }, { "path": "../../packages/ui" }, { "path": "../../packages/agent" }]
+}

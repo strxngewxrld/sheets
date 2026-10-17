@@ -1,0 +1,1439 @@
+{
+  "name": "sheets-vscode",
+  "displayName": "Sheets – Excel & CSV Editor",
+  "description": "Open, edit and chart .xlsx and .csv files like in Excel. Includes language model tools so AI agents can operate spreadsheets.",
+  "version": "0.1.0",
+  "publisher": "sheets",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Visualization",
+    "Data Science",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "sheets.spreadsheet",
+        "displayName": "Sheets",
+        "selector": [
+          {
+            "filenamePattern": "*.xlsx"
+          },
+          {
+            "filenamePattern": "*.xlsm"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "sheets.csv",
+        "displayName": "Sheets (CSV)",
+        "selector": [
+          {
+            "filenamePattern": "*.csv"
+          },
+          {
+            "filenamePattern": "*.tsv"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "sheets.newWorkbook",
+        "title": "New Workbook",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.openWithSheets",
+        "title": "Open with Sheets",
+        "category": "Sheets"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "sheets.openWithSheets",
+          "when": "resourceExtname =~ /\\.(csv|tsv|xlsx|xlsm)$/",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Sheets",
+      "properties": {
+        "sheets.agentTools.headlessWrites": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow language model tools to modify spreadsheet files that are not open in an editor (changes are saved to disk)."
+        }
+      }
+    },
+    "languageModelTools": [
+      {
+        "name": "sheets_get_workbook_info",
+        "displayName": "Sheets: get workbook info",
+        "toolReferenceName": "sheets_get_workbook_info",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Overview of the workbook: sheets with their used ranges and charts, the active sheet, defined names and the current user selection",
+        "modelDescription": "Overview of the workbook: sheets with their used ranges and charts, the active sheet, defined names and the current user selection. Call this first to orient yourself.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            }
+          }
+        }
+      },
+      {
+        "name": "sheets_read_range",
+        "displayName": "Sheets: read range",
+        "toolReferenceName": "sheets_read_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Reads cell values from a range",
+        "modelDescription": "Reads cell values from a range. Returns a 2D array of computed values (numbers, strings, booleans, null for empty, \"#ERR!\" strings for errors) plus formulas for cells that contain them. Use format \"markdown\" for a readable table, \"display\" for formatted text as the user sees it.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string",
+              "description": "A1 range, e.g. \"A1:D20\", \"B:B\" or \"Sheet2!A1:C5\". Whole columns/rows are clipped to the used area."
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "values",
+                "display",
+                "markdown"
+              ],
+              "default": "values"
+            },
+            "include_formulas": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "range"
+          ]
+        }
+      },
+      {
+        "name": "sheets_write_range",
+        "displayName": "Sheets: write range",
+        "toolReferenceName": "sheets_write_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Writes a 2D array of values starting at a cell",
+        "modelDescription": "Writes a 2D array of values starting at a cell. Strings starting with \"=\" are formulas (e.g. \"=SUM(B2:B10)\"); other strings are parsed like typed input (\"12%\", \"2024-01-31\", \"1,234.5\"). null clears a cell. Existing formatting is kept. Returns the computed values of written formulas.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "start": {
+              "type": "string",
+              "description": "Top-left cell, e.g. \"A1\""
+            },
+            "values": {
+              "type": "array",
+              "description": "Rows of cell values, e.g. [[\"Name\",\"Total\"],[\"A\",1],[\"Sum\",\"=SUM(B2:B2)\"]]",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "parse": {
+              "type": "boolean",
+              "description": "Parse strings like typed input (default true). Set false to store text literally.",
+              "default": true
+            }
+          },
+          "required": [
+            "start",
+            "values"
+          ]
+        }
+      },
+      {
+        "name": "sheets_fill_formula",
+        "displayName": "Sheets: fill formula",
+        "toolReferenceName": "sheets_fill_formula",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Writes one formula into every cell of a range, adjusting relative references like Excel's fill-down/right",
+        "modelDescription": "Writes one formula into every cell of a range, adjusting relative references like Excel's fill-down/right. The formula is written as it should appear in the top-left cell, e.g. range \"D2:D100\", formula \"=B2*C2\".",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string",
+              "description": "Target range, e.g. \"D2:D100\""
+            },
+            "formula": {
+              "type": "string",
+              "description": "Formula for the top-left cell, starting with \"=\""
+            }
+          },
+          "required": [
+            "range",
+            "formula"
+          ]
+        }
+      },
+      {
+        "name": "sheets_clear_range",
+        "displayName": "Sheets: clear range",
+        "toolReferenceName": "sheets_clear_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Clears a range",
+        "modelDescription": "Clears a range. mode \"contents\" keeps formatting, \"formats\" keeps values, \"all\" removes everything.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "contents",
+                "formats",
+                "all"
+              ],
+              "default": "contents"
+            }
+          },
+          "required": [
+            "range"
+          ]
+        }
+      },
+      {
+        "name": "sheets_format_range",
+        "displayName": "Sheets: format range",
+        "toolReferenceName": "sheets_format_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Applies formatting (font, colors, alignment, number format, borders) to a range.",
+        "modelDescription": "Applies formatting (font, colors, alignment, number format, borders) to a range.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string"
+            },
+            "style": {
+              "type": "object",
+              "description": "Style properties to set. Use null to remove a property.",
+              "properties": {
+                "bold": {
+                  "type": "boolean"
+                },
+                "italic": {
+                  "type": "boolean"
+                },
+                "underline": {
+                  "type": "boolean"
+                },
+                "strike": {
+                  "type": "boolean"
+                },
+                "fontName": {
+                  "type": "string"
+                },
+                "fontSize": {
+                  "type": "number",
+                  "description": "Font size in points"
+                },
+                "color": {
+                  "type": "string",
+                  "description": "Font color as hex, e.g. \"#C00000\""
+                },
+                "fill": {
+                  "type": "string",
+                  "description": "Background color as hex, e.g. \"#FFF2CC\""
+                },
+                "hAlign": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "center",
+                    "right",
+                    "justify"
+                  ]
+                },
+                "vAlign": {
+                  "type": "string",
+                  "enum": [
+                    "top",
+                    "middle",
+                    "bottom"
+                  ]
+                },
+                "wrap": {
+                  "type": "boolean"
+                },
+                "numFmt": {
+                  "type": "string",
+                  "description": "Excel number format, e.g. \"#,##0.00\", \"0%\", \"dd.mm.yyyy\", \"#,##0.00 \\\"€\\\"\""
+                }
+              },
+              "additionalProperties": false
+            },
+            "borders": {
+              "type": "string",
+              "enum": [
+                "all",
+                "outline",
+                "none"
+              ],
+              "description": "Optional thin borders around/inside the range"
+            }
+          },
+          "required": [
+            "range"
+          ]
+        }
+      },
+      {
+        "name": "sheets_insert_rows",
+        "displayName": "Sheets: insert rows",
+        "toolReferenceName": "sheets_insert_rows",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Inserts empty rows before the given 1-based row number",
+        "modelDescription": "Inserts empty rows before the given 1-based row number. Formulas are adjusted.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "before_row": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          "required": [
+            "before_row"
+          ]
+        }
+      },
+      {
+        "name": "sheets_delete_rows",
+        "displayName": "Sheets: delete rows",
+        "toolReferenceName": "sheets_delete_rows",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Deletes rows starting at the given 1-based row number",
+        "modelDescription": "Deletes rows starting at the given 1-based row number. References to deleted cells become #REF!.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          "required": [
+            "row"
+          ]
+        }
+      },
+      {
+        "name": "sheets_insert_columns",
+        "displayName": "Sheets: insert columns",
+        "toolReferenceName": "sheets_insert_columns",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Inserts empty columns before the given column letter",
+        "modelDescription": "Inserts empty columns before the given column letter. Formulas are adjusted.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "before_column": {
+              "type": "string",
+              "description": "Column letter, e.g. \"C\""
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          "required": [
+            "before_column"
+          ]
+        }
+      },
+      {
+        "name": "sheets_delete_columns",
+        "displayName": "Sheets: delete columns",
+        "toolReferenceName": "sheets_delete_columns",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Deletes columns starting at the given column letter.",
+        "modelDescription": "Deletes columns starting at the given column letter.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "column": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          "required": [
+            "column"
+          ]
+        }
+      },
+      {
+        "name": "sheets_add_sheet",
+        "displayName": "Sheets: add sheet",
+        "toolReferenceName": "sheets_add_sheet",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Adds a new worksheet.",
+        "modelDescription": "Adds a new worksheet.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "name": {
+              "type": "string"
+            },
+            "position": {
+              "type": "integer",
+              "description": "0-based position; defaults to the end"
+            },
+            "activate": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      },
+      {
+        "name": "sheets_rename_sheet",
+        "displayName": "Sheets: rename sheet",
+        "toolReferenceName": "sheets_rename_sheet",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Renames a sheet",
+        "modelDescription": "Renames a sheet. Formulas referencing it are updated.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string"
+            },
+            "new_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sheet",
+            "new_name"
+          ]
+        }
+      },
+      {
+        "name": "sheets_delete_sheet",
+        "displayName": "Sheets: delete sheet",
+        "toolReferenceName": "sheets_delete_sheet",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Deletes a sheet",
+        "modelDescription": "Deletes a sheet. References to it become #REF!.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sheet"
+          ]
+        }
+      },
+      {
+        "name": "sheets_activate_sheet",
+        "displayName": "Sheets: activate sheet",
+        "toolReferenceName": "sheets_activate_sheet",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Switches the visible sheet in the user interface.",
+        "modelDescription": "Switches the visible sheet in the user interface.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sheet"
+          ]
+        }
+      },
+      {
+        "name": "sheets_select_range",
+        "displayName": "Sheets: select range",
+        "toolReferenceName": "sheets_select_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Selects and scrolls to a range in the user interface, e.g",
+        "modelDescription": "Selects and scrolls to a range in the user interface, e.g. to show the user a result.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "range"
+          ]
+        }
+      },
+      {
+        "name": "sheets_sort_range",
+        "displayName": "Sheets: sort range",
+        "toolReferenceName": "sheets_sort_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Sorts the rows of a range by one or more columns.",
+        "modelDescription": "Sorts the rows of a range by one or more columns.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string",
+              "description": "Range including all columns that belong to a row, e.g. \"A1:F200\""
+            },
+            "by": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "column": {
+                    "type": "string",
+                    "description": "Column letter"
+                  },
+                  "descending": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "column"
+                ]
+              }
+            },
+            "has_header": {
+              "type": "boolean",
+              "description": "Keep the first row in place",
+              "default": true
+            }
+          },
+          "required": [
+            "range",
+            "by"
+          ]
+        }
+      },
+      {
+        "name": "sheets_copy_range",
+        "displayName": "Sheets: copy range",
+        "toolReferenceName": "sheets_copy_range",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Copies a range (values, formulas and formats) to another location",
+        "modelDescription": "Copies a range (values, formulas and formats) to another location. Relative formula references are adjusted.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "source": {
+              "type": "string"
+            },
+            "destination": {
+              "type": "string",
+              "description": "Top-left target cell, optionally sheet-qualified (\"Sheet2!A1\")"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "all",
+                "values",
+                "formats",
+                "formulas"
+              ],
+              "default": "all"
+            },
+            "move": {
+              "type": "boolean",
+              "description": "Cut instead of copy",
+              "default": false
+            }
+          },
+          "required": [
+            "source",
+            "destination"
+          ]
+        }
+      },
+      {
+        "name": "sheets_find",
+        "displayName": "Sheets: find",
+        "toolReferenceName": "sheets_find",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Searches cell contents (displayed values or formulas) and returns matching cells.",
+        "modelDescription": "Searches cell contents (displayed values or formulas) and returns matching cells.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "query": {
+              "type": "string"
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Restrict to one sheet"
+            },
+            "regex": {
+              "type": "boolean",
+              "default": false
+            },
+            "in_formulas": {
+              "type": "boolean",
+              "default": false
+            },
+            "whole_cell": {
+              "type": "boolean",
+              "default": false
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "default": false
+            },
+            "limit": {
+              "type": "integer",
+              "default": 100
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      },
+      {
+        "name": "sheets_evaluate_formula",
+        "displayName": "Sheets: evaluate formula",
+        "toolReferenceName": "sheets_evaluate_formula",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Evaluates a formula without writing it to the sheet, e.g",
+        "modelDescription": "Evaluates a formula without writing it to the sheet, e.g. \"=AVERAGE(B2:B50)\". Useful for checking results or exploring data.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "formula": {
+              "type": "string"
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            }
+          },
+          "required": [
+            "formula"
+          ]
+        }
+      },
+      {
+        "name": "sheets_inspect_cell",
+        "displayName": "Sheets: inspect cell",
+        "toolReferenceName": "sheets_inspect_cell",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Detailed information about one cell: value, displayed text, formula, style, cells it references (precedents) and cells that depend on it.",
+        "modelDescription": "Detailed information about one cell: value, displayed text, formula, style, cells it references (precedents) and cells that depend on it.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "cell": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cell"
+          ]
+        }
+      },
+      {
+        "name": "sheets_create_chart",
+        "displayName": "Sheets: create chart",
+        "toolReferenceName": "sheets_create_chart",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Creates a chart from a data range",
+        "modelDescription": "Creates a chart from a data range. A text header row becomes series names and a leading text column becomes category labels (like Excel). For scatter charts the first column holds the x values.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "column",
+                "bar",
+                "line",
+                "area",
+                "pie",
+                "doughnut",
+                "scatter"
+              ]
+            },
+            "data_range": {
+              "type": "string",
+              "description": "e.g. \"A1:C13\" including headers"
+            },
+            "title": {
+              "type": "string"
+            },
+            "position": {
+              "type": "string",
+              "description": "Top-left cell of the chart, e.g. \"E2\". Defaults to right of the data."
+            },
+            "width_columns": {
+              "type": "integer",
+              "default": 8
+            },
+            "height_rows": {
+              "type": "integer",
+              "default": 16
+            },
+            "series_in_rows": {
+              "type": "boolean",
+              "default": false
+            },
+            "stacked": {
+              "type": "boolean",
+              "default": false
+            },
+            "legend": {
+              "type": "string",
+              "enum": [
+                "top",
+                "bottom",
+                "left",
+                "right",
+                "none"
+              ]
+            },
+            "x_axis_title": {
+              "type": "string"
+            },
+            "y_axis_title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data_range"
+          ]
+        }
+      },
+      {
+        "name": "sheets_update_chart",
+        "displayName": "Sheets: update chart",
+        "toolReferenceName": "sheets_update_chart",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Changes an existing chart (type, title, data, position, legend, stacking).",
+        "modelDescription": "Changes an existing chart (type, title, data, position, legend, stacking).",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "chart_id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "column",
+                "bar",
+                "line",
+                "area",
+                "pie",
+                "doughnut",
+                "scatter"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "data_range": {
+              "type": "string",
+              "description": "New data range; series are rebuilt from it"
+            },
+            "position": {
+              "type": "string",
+              "description": "New top-left cell"
+            },
+            "width_columns": {
+              "type": "integer"
+            },
+            "height_rows": {
+              "type": "integer"
+            },
+            "stacked": {
+              "type": "boolean"
+            },
+            "legend": {
+              "type": "string",
+              "enum": [
+                "top",
+                "bottom",
+                "left",
+                "right",
+                "none"
+              ]
+            },
+            "x_axis_title": {
+              "type": "string"
+            },
+            "y_axis_title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "chart_id"
+          ]
+        }
+      },
+      {
+        "name": "sheets_delete_chart",
+        "displayName": "Sheets: delete chart",
+        "toolReferenceName": "sheets_delete_chart",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Deletes a chart.",
+        "modelDescription": "Deletes a chart.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "chart_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "chart_id"
+          ]
+        }
+      },
+      {
+        "name": "sheets_list_charts",
+        "displayName": "Sheets: list charts",
+        "toolReferenceName": "sheets_list_charts",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Lists charts with their ids, data references and a preview of the plotted data.",
+        "modelDescription": "Lists charts with their ids, data references and a preview of the plotted data.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Restrict to one sheet"
+            }
+          }
+        }
+      },
+      {
+        "name": "sheets_set_column_width",
+        "displayName": "Sheets: set column width",
+        "toolReferenceName": "sheets_set_column_width",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Sets the width of one or more columns in pixels (default width is 64)",
+        "modelDescription": "Sets the width of one or more columns in pixels (default width is 64). Use null to reset.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "columns": {
+              "type": "string",
+              "description": "e.g. \"B\" or \"A:D\""
+            },
+            "width": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "columns",
+            "width"
+          ]
+        }
+      },
+      {
+        "name": "sheets_set_row_height",
+        "displayName": "Sheets: set row height",
+        "toolReferenceName": "sheets_set_row_height",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Sets the height of one or more rows in pixels (default 20)",
+        "modelDescription": "Sets the height of one or more rows in pixels (default 20). Use null to reset.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "rows": {
+              "type": "string",
+              "description": "e.g. \"1\" or \"2:10\""
+            },
+            "height": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "rows",
+            "height"
+          ]
+        }
+      },
+      {
+        "name": "sheets_merge_cells",
+        "displayName": "Sheets: merge cells",
+        "toolReferenceName": "sheets_merge_cells",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Merges a range into one cell (only the top-left value is kept), or unmerges it.",
+        "modelDescription": "Merges a range into one cell (only the top-left value is kept), or unmerges it.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string"
+            },
+            "unmerge": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "range"
+          ]
+        }
+      },
+      {
+        "name": "sheets_freeze_panes",
+        "displayName": "Sheets: freeze panes",
+        "toolReferenceName": "sheets_freeze_panes",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Freezes the top rows and/or left columns so they stay visible while scrolling",
+        "modelDescription": "Freezes the top rows and/or left columns so they stay visible while scrolling. Use 0 to unfreeze.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "columns": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      {
+        "name": "sheets_define_name",
+        "displayName": "Sheets: define name",
+        "toolReferenceName": "sheets_define_name",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Creates or deletes a named range usable in formulas, e.g",
+        "modelDescription": "Creates or deletes a named range usable in formulas, e.g. name \"TaxRate\" ref \"Sheet1!$B$1\".",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "name": {
+              "type": "string"
+            },
+            "ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "ref"
+          ]
+        }
+      },
+      {
+        "name": "sheets_list_functions",
+        "displayName": "Sheets: list functions",
+        "toolReferenceName": "sheets_list_functions",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Lists supported spreadsheet functions with syntax, optionally filtered by category or name.",
+        "modelDescription": "Lists supported spreadsheet functions with syntax, optionally filtered by category or name.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "math",
+                "statistical",
+                "logical",
+                "lookup",
+                "text",
+                "date",
+                "info"
+              ]
+            },
+            "search": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "sheets_undo",
+        "displayName": "Sheets: undo",
+        "toolReferenceName": "sheets_undo",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Undoes the last change (including changes made by the user).",
+        "modelDescription": "Undoes the last change (including changes made by the user).",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            }
+          }
+        }
+      },
+      {
+        "name": "sheets_redo",
+        "displayName": "Sheets: redo",
+        "toolReferenceName": "sheets_redo",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Redoes the last undone change.",
+        "modelDescription": "Redoes the last undone change.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            }
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "package": "node scripts/build.mjs && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@sheets/agent": "0.1.0",
+    "@sheets/core": "0.1.0",
+    "@sheets/ui": "0.1.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^4.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@sheets/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server exposing spreadsheet tools for .xlsx/.csv files",
+  "type": "module",
+  "bin": {
+    "sheets-mcp": "./dist/server.js"
+  },
+  "main": "./dist/server.js",
+  "files": ["dist"],
+  "scripts": {
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --conditions=source --outfile=dist/server.js --banner:js='#!/usr/bin/env node' --packages=bundle",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1"
+  },
+  "devDependencies": {
+    "@sheets/agent": "0.1.0",
+    "@sheets/core": "0.1.0"
+  }
+}

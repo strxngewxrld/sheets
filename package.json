@@ -1,0 +1,26 @@
+{
+  "name": "sheets",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/agent",
+    "packages/ui",
+    "packages/mcp",
+    "apps/web",
+    "apps/vscode"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "dev": "npm run dev -w @sheets/web",
+    "build": "tsc -b && npm run build -w @sheets/web && npm run build -w @sheets/mcp && npm run build -w sheets-vscode"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}
