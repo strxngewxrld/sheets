@@ -10,5 +10,9 @@
   "command.hideRows": "Zeilen ausblenden",
   "command.unhideRows": "Zeilen einblenden",
   "command.hideCols": "Spalten ausblenden",
-  "command.unhideCols": "Spalten einblenden"
+  "command.unhideCols": "Spalten einblenden",
+  "command.goTo": "Gehe zu Zelle…",
+  "command.zoomIn": "Vergrößern",
+  "command.zoomOut": "Verkleinern",
+  "command.zoomReset": "Zoom zurücksetzen"
 }

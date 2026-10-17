@@ -316,13 +316,14 @@ export class GridRenderer {
     const formatted = formatValueEx(value, style?.numFmt, state.locale);
     let text = formatted.text;
     if (!text) return;
-    ctx.font = cssFont(style, t);
+    const zoom = vp.geo.zoom;
+    ctx.font = cssFont(style, t, zoom);
     let color = style?.color ?? formatted.color;
     if (!color) color = style?.fill ? (luminance(style.fill) > 0.5 ? '#1f1f1f' : '#f5f5f5') : t.fg;
     if (typeof value === 'object') color = style?.color ?? (t.dark ? '#ff8a80' : '#c62828');
     ctx.fillStyle = color;
-    const pad = 3;
-    const fontPx = ((style?.fontSize ?? DEFAULT_FONT_SIZE_PT) * 96) / 72;
+    const pad = 3 * zoom;
+    const fontPx = (((style?.fontSize ?? DEFAULT_FONT_SIZE_PT) * 96) / 72) * zoom;
     const lineH = Math.round(fontPx * 1.2);
     const avail = w - pad * 2;
 

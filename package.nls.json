@@ -10,5 +10,9 @@
   "command.hideRows": "Hide Rows",
   "command.unhideRows": "Unhide Rows",
   "command.hideCols": "Hide Columns",
-  "command.unhideCols": "Unhide Columns"
+  "command.unhideCols": "Unhide Columns",
+  "command.goTo": "Go To Cell…",
+  "command.zoomIn": "Zoom In",
+  "command.zoomOut": "Zoom Out",
+  "command.zoomReset": "Reset Zoom"
 }

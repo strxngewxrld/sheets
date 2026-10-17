@@ -90,14 +90,14 @@ export class CellEditor {
   }
 
   /** Positions the editor over a cell rect (grid container coordinates). */
-  place(rect: { x: number; y: number; w: number; h: number }, style: CellStyle | undefined, theme: GridTheme, maxWidth: number): void {
+  place(rect: { x: number; y: number; w: number; h: number }, style: CellStyle | undefined, theme: GridTheme, maxWidth: number, zoom = 1): void {
     const ta = this.textarea;
     if (!this.editing) {
       ta.style.left = `${rect.x}px`;
       ta.style.top = `${rect.y}px`;
       return;
     }
-    ta.style.font = cssFont(style, theme);
+    ta.style.font = cssFont(style, theme, zoom);
     ta.style.left = `${rect.x - 1}px`;
     ta.style.top = `${rect.y - 1}px`;
     ta.style.minWidth = `${rect.w + 2}px`;

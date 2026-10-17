@@ -100,7 +100,7 @@ export interface SelectionInfo {
 }
 
 /** Commands a host (e.g. VS Code keybindings) can trigger in the view. */
-export type ViewCommand = 'find' | 'replace' | 'hideRows' | 'unhideRows' | 'hideCols' | 'unhideCols';
+export type ViewCommand = 'find' | 'replace' | 'hideRows' | 'unhideRows' | 'hideCols' | 'unhideCols' | 'goTo' | 'zoomIn' | 'zoomOut' | 'zoomReset';
 
 export type ViewEvents = {
   selectionChange: SelectionInfo;
@@ -108,6 +108,9 @@ export type ViewEvents = {
 };
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36];
+const ZOOM_STEPS = [0.25, 0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+export const MIN_ZOOM = ZOOM_STEPS[0]!;
+export const MAX_ZOOM = ZOOM_STEPS.at(-1)!;
 
 type DragMode =
   | { kind: 'select' }
@@ -159,6 +162,8 @@ export class SpreadsheetView {
   private disposers: (() => void)[] = [];
   private wbOff: (() => void) | null = null;
   private findDialog: FindDialog | null = null;
+  private zoom = 1;
+  private zoomLabel?: HTMLButtonElement;
 
   constructor(container: HTMLElement, workbook: Workbook, options: SpreadsheetViewOptions = {}) {
     injectStyles(container.ownerDocument);
@@ -228,9 +233,56 @@ export class SpreadsheetView {
     }, this.strings, replace);
   }
 
+  /** Current zoom factor (1 = 100 %). */
+  get zoomLevel(): number {
+    return this.zoom;
+  }
+
+  /** Sets the zoom factor (0.25-4), keeping the top-left cell in view. */
+  setZoom(zoom: number): void {
+    const next = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom)) * 100) / 100;
+    if (next === this.zoom) return;
+    const ratio = next / this.zoom;
+    const { scrollLeft, scrollTop } = this.scroller;
+    this.zoom = next;
+    this.geoDirty = true;
+    this.chartsDirty = true;
+    this.ensureGeometry();
+    this.render();
+    this.scroller.scrollLeft = scrollLeft * ratio;
+    this.scroller.scrollTop = scrollTop * ratio;
+    this.scheduleRender();
+  }
+
+  private stepZoom(direction: 1 | -1): void {
+    const next = direction > 0 ? ZOOM_STEPS.find((z) => z > this.zoom + 1e-9) : [...ZOOM_STEPS].reverse().find((z) => z < this.zoom - 1e-9);
+    if (next !== undefined) this.setZoom(next);
+  }
+
+  /** Focuses the name box to jump to a cell, range or defined name (Ctrl+G). */
+  openGoTo(): void {
+    if (this.editor.editing) this.commitEdit();
+    if (this.nameBox) {
+      this.nameBox.focus();
+      this.nameBox.select();
+      return;
+    }
+    const target = prompt(this.strings.goTo, formatRange(this.selectionRange()));
+    if (target) this.goTo(target);
+  }
+
+  private goTo(text: string): void {
+    const named = this.wb.names.get(text.trim().toUpperCase());
+    this.select(named ? named.ref : text.trim());
+  }
+
   /** Runs a host command such as find or replace. */
   runCommand(command: ViewCommand): void {
     switch (command) {
+      case 'goTo': this.openGoTo(); break;
+      case 'zoomIn': this.stepZoom(1); break;
+      case 'zoomOut': this.stepZoom(-1); break;
+      case 'zoomReset': this.setZoom(1); break;
       case 'find': this.openFind(false); break;
       case 'replace': this.openFind(true); break;
       case 'hideRows': case 'unhideRows': case 'hideCols': case 'unhideCols':
@@ -410,10 +462,34 @@ export class SpreadsheetView {
         this.statusEl.setAttribute('aria-live', 'polite');
         if (!this.options.sheetTabs) this.statusEl.style.marginLeft = 'auto';
         bottom.appendChild(this.statusEl);
+        bottom.appendChild(this.buildZoomControl());
       }
       this.root.appendChild(bottom);
       this.renderTabs();
     }
+  }
+
+  private buildZoomControl(): HTMLDivElement {
+    const s = this.strings;
+    const wrap = document.createElement('div');
+    wrap.className = 'sx-zoom';
+    const button = (label: string, title: string, action: () => void) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sx-btn';
+      b.textContent = label;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', action);
+      wrap.append(b);
+      return b;
+    };
+    button('−', s.zoomOut, () => this.stepZoom(-1));
+    this.zoomLabel = button('100 %', s.zoomReset, () => this.setZoom(1));
+    this.zoomLabel.classList.add('sx-zoom-level');
+    button('+', s.zoomIn, () => this.stepZoom(1));
+    return wrap;
   }
 
   private buildToolbar(): HTMLDivElement {
@@ -639,7 +715,7 @@ export class SpreadsheetView {
     const sheet = this.sheet;
     if (this.geoDirty || this.geoSheet !== sheet) {
       this.vp.sheet = sheet;
-      this.vp.geo = new Geometry(sheet);
+      this.vp.geo = new Geometry(sheet, this.zoom);
       this.geoSheet = sheet;
       this.geoDirty = false;
     }
@@ -706,7 +782,7 @@ export class SpreadsheetView {
     const ec = this.editor.editing ? this.editor.cell : this.active;
     const merge = sheet.mergeAt(ec.row, ec.col);
     const rect = vp.rect(merge ?? { start: ec, end: ec });
-    this.editor.place(rect, sheet.getCell(ec.row, ec.col)?.style, this.theme, width);
+    this.editor.place(rect, sheet.getCell(ec.row, ec.col)?.style, this.theme, width, this.zoom);
 
     if (this.chartsDirty) {
       this.charts.update(true);
@@ -750,6 +826,7 @@ export class SpreadsheetView {
     }
     const size = this.controls.fontSize as HTMLSelectElement | undefined;
     if (size) size.value = String(style?.fontSize ?? 11);
+    if (this.zoomLabel) this.zoomLabel.textContent = `${Math.round(this.zoom * 100)} %`;
     this.updateStatus(range);
   }
 
@@ -1275,6 +1352,13 @@ export class SpreadsheetView {
       if (sc.scrollLeft + sc.clientWidth > sc.scrollWidth - 400 && this.extentCols < MAX_COLS) this.extentCols = Math.min(MAX_COLS, this.extentCols + 20);
       this.scheduleRender();
     });
+    // Ctrl/Cmd+wheel and trackpad pinch zoom the grid instead of the page.
+    grid.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.setZoom(this.zoom * Math.exp(-Math.max(-50, Math.min(50, e.deltaY)) / 400));
+    }, { passive: false, capture: true });
     grid.addEventListener('wheel', (e) => {
       if (this.scroller.contains(e.target as Node)) return;
       e.preventDefault();
@@ -1366,7 +1450,7 @@ export class SpreadsheetView {
     if (y < vp.headerH) {
       const border = this.colBorderAt(x);
       if (border !== null && !this.options.readOnly) {
-        this.drag = { kind: 'resize-col', index: border, start: x, size: vp.geo.cols.size(border) };
+        this.drag = { kind: 'resize-col', index: border, start: x, size: vp.geo.cols.size(border) / this.zoom };
       } else {
         this.commitEdit();
         const c = vp.colAt(x);
@@ -1378,7 +1462,7 @@ export class SpreadsheetView {
     } else if (x < vp.headerW) {
       const border = this.rowBorderAt(y);
       if (border !== null && !this.options.readOnly) {
-        this.drag = { kind: 'resize-row', index: border, start: y, size: vp.geo.rows.size(border) };
+        this.drag = { kind: 'resize-row', index: border, start: y, size: vp.geo.rows.size(border) / this.zoom };
       } else {
         this.commitEdit();
         const r = vp.rowAt(y);
@@ -1453,7 +1537,7 @@ export class SpreadsheetView {
         this.scheduleRender();
         break;
       case 'resize-col': {
-        const size = Math.max(0, drag.size + (x - drag.start));
+        const size = Math.max(0, Math.round(drag.size + (x - drag.start) / this.zoom));
         this.sheet.colWidths.set(drag.index, size); // live preview, committed on mouseup
         this.geoDirty = true;
         this.chartsDirty = true;
@@ -1461,7 +1545,7 @@ export class SpreadsheetView {
         break;
       }
       case 'resize-row': {
-        const size = Math.max(0, drag.size + (y - drag.start));
+        const size = Math.max(0, Math.round(drag.size + (y - drag.start) / this.zoom));
         this.sheet.rowHeights.set(drag.index, size);
         this.geoDirty = true;
         this.chartsDirty = true;
@@ -1675,6 +1759,11 @@ export class SpreadsheetView {
     }
 
     // ---- Not editing: navigation and shortcuts ----
+    if (mod && !e.shiftKey && !e.altKey && e.code === 'KeyG') {
+      e.preventDefault();
+      this.openGoTo();
+      return;
+    }
     if (mod && !e.shiftKey && (e.code === 'KeyF' || e.code === 'KeyH')) {
       // Ctrl+F finds; Ctrl+H (and Cmd+Option+F on macOS, as in VS Code) replaces.
       e.preventDefault();
@@ -1827,9 +1916,7 @@ export class SpreadsheetView {
     nb.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        const text = nb.value.trim();
-        const named = this.wb.names.get(text.toUpperCase());
-        this.select(named ? named.ref : text);
+        this.goTo(nb.value);
         this.focus();
       } else if (e.key === 'Escape') {
         e.preventDefault();

@@ -46,13 +46,17 @@ export class Axis {
   }
 }
 
+/** Screen geometry of a sheet; `zoom` scales all row heights and column widths. */
 export class Geometry {
   readonly cols: Axis;
   readonly rows: Axis;
-  constructor(sheet: Sheet) {
-    this.cols = new Axis(sheet.colWidths, sheet.defaultColWidth, MAX_COLS);
+  readonly zoom: number;
+  constructor(sheet: Sheet, zoom = 1) {
+    this.zoom = zoom;
+    const scale = (sizes: Map<number, number>) => (zoom === 1 ? sizes : new Map([...sizes].map(([i, v]) => [i, v * zoom])));
+    this.cols = new Axis(scale(sheet.colWidths), sheet.defaultColWidth * zoom, MAX_COLS);
     const sizes = new Map(sheet.rowHeights);
     for (const row of tableFilteredRows(sheet)) sizes.set(row, 0);
-    this.rows = new Axis(sizes, sheet.defaultRowHeight, MAX_ROWS);
+    this.rows = new Axis(scale(sizes), sheet.defaultRowHeight * zoom, MAX_ROWS);
   }
 }

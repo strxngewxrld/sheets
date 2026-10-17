@@ -12,7 +12,7 @@ export interface InitMessage {
 }
 
 /** Editor commands bound to VS Code keybindings (see package.json). */
-export type ViewCommand = 'find' | 'replace' | 'hideRows' | 'unhideRows' | 'hideCols' | 'unhideCols';
+export type ViewCommand = 'find' | 'replace' | 'hideRows' | 'unhideRows' | 'hideCols' | 'unhideCols' | 'goTo' | 'zoomIn' | 'zoomOut' | 'zoomReset';
 
 export type HostToWebview =
   | InitMessage

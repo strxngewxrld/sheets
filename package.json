@@ -134,6 +134,26 @@
         "command": "sheets.unhideCols",
         "title": "%command.unhideCols%",
         "category": "Sheets"
+      },
+      {
+        "command": "sheets.goTo",
+        "title": "%command.goTo%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.zoomIn",
+        "title": "%command.zoomIn%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.zoomOut",
+        "title": "%command.zoomOut%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.zoomReset",
+        "title": "%command.zoomReset%",
+        "category": "Sheets"
       }
     ],
     "menus": {
@@ -174,6 +194,22 @@
         },
         {
           "command": "sheets.unhideCols",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.goTo",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.zoomIn",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.zoomOut",
+          "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+        },
+        {
+          "command": "sheets.zoomReset",
           "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
         }
       ]
@@ -2176,6 +2212,12 @@
         "command": "sheets.unhideCols",
         "key": "ctrl+shift+0",
         "mac": "cmd+shift+0",
+        "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      },
+      {
+        "command": "sheets.goTo",
+        "key": "ctrl+g",
+        "mac": "cmd+g",
         "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
       }
     ]

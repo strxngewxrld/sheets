@@ -145,6 +145,9 @@ export const CSS = `
 .sx-tab[aria-selected="true"] { color: var(--sx-fg); background: var(--sx-bg); box-shadow: inset 0 -2px 0 var(--sx-accent); font-weight: 600; }
 .sx-tab input { font: inherit; width: 100px; border: 1px solid var(--sx-accent); background: var(--sx-input-bg); color: var(--sx-input-fg); }
 .sx-status { display: flex; align-items: center; gap: 14px; padding: 0 12px; color: var(--sx-muted); font-size: 12px; white-space: nowrap; }
+.sx-zoom { display: flex; align-items: center; gap: 2px; padding: 0 8px; margin-left: auto; border-left: 1px solid var(--sx-grid); }
+.sx-zoom .sx-btn { min-width: 22px; height: 22px; padding: 0 4px; font-size: 12px; }
+.sx-zoom .sx-zoom-level { min-width: 48px; color: var(--sx-muted); }
 .sx-menu {
   position: fixed; z-index: 1000; min-width: 200px; background: var(--sx-menu-bg); color: var(--sx-menu-fg); border: 1px solid var(--sx-grid);
   border-radius: 6px; box-shadow: var(--sx-shadow); padding: 4px 0; font-size: 13px;
