@@ -1,5 +1,6 @@
 import {
   applyBorders,
+  applyDataValidation,
   applyStyle,
   CHART_TYPES,
   clearRange,
@@ -39,12 +40,18 @@ import {
   unhideRows,
   unmergeCells,
   updateChart,
+  invalidCells,
+  VALIDATION_OPERATORS,
+  VALIDATION_TYPES,
   walk,
   chartFromRange,
   MAX_COLS,
   MAX_ROWS,
   TABLE_THEMES,
   type CellPatch,
+  type DataValidation,
+  type ValidationOperator,
+  type ValidationType,
   type ConditionalFormatRule,
   type ChartSpec,
   type ChartType,
@@ -982,6 +989,65 @@ export const TOOLS: ToolImpl[] = [
         hidden_rows: [...sheet.rowHeights].filter(([, h]) => h === 0).map(([r]) => r + 1).sort((x, y) => x - y),
         hidden_columns: [...sheet.colWidths].filter(([, w]) => w === 0).map(([c]) => colToName(c)).sort(),
       };
+    },
+  },
+  {
+    name: 'set_data_validation',
+    description: 'Sets or removes data validation for a range, e.g. a dropdown list (type "list" with values or a source range) or number limits. The range is cut out of existing rules first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sheet: SHEET_PARAM,
+        range: { type: 'string' },
+        type: { type: 'string', enum: [...VALIDATION_TYPES, 'none'], description: '"none" removes validation from the range' },
+        operator: { type: 'string', enum: [...VALIDATION_OPERATORS], default: 'between' },
+        values: { type: 'array', items: { type: ['string', 'number'] }, description: 'Allowed values for a list' },
+        formula1: { type: 'string', description: 'Value, source range ("=$D$1:$D$9") or formula; relative references are relative to the top-left cell' },
+        formula2: { type: 'string', description: 'Maximum for between/notBetween' },
+        allow_blank: { type: 'boolean', default: true },
+        dropdown: { type: 'boolean', default: true },
+        error_style: { type: 'string', enum: ['stop', 'warning', 'information'], default: 'stop' },
+        error_message: { type: 'string' },
+        input_message: { type: 'string' },
+      },
+      required: ['range', 'type'],
+    },
+    run: (ctx, input) => {
+      const text = str(input, 'range');
+      const sheet = sheetOf(ctx, input, text);
+      const type = str(input, 'type');
+      if (type === 'none') {
+        applyDataValidation(ctx.wb, sheet.name, rangeOf(text), null);
+        return { rules: sheet.validations.length };
+      }
+      const strip = (f: string) => f.trim().replace(/^=/, '');
+      const values = Array.isArray(input.values) ? (input.values as unknown[]).map(String) : null;
+      const formula1 = values ? `"${values.join(',').replace(/"/g, '""')}"` : optStr(input, 'formula1');
+      if (!formula1) throw new ToolInputError('Pass "values" (lists) or "formula1".');
+      const rule: Omit<DataValidation, 'range'> = { type: type as ValidationType, formula1: values ? formula1 : strip(formula1) };
+      if (type !== 'list' && type !== 'custom') rule.operator = (optStr(input, 'operator') ?? 'between') as ValidationOperator;
+      const formula2 = optStr(input, 'formula2');
+      if (formula2) rule.formula2 = strip(formula2);
+      if (input.allow_blank === false) rule.allowBlank = false;
+      if (input.dropdown === false) rule.dropdown = false;
+      const style = optStr(input, 'error_style');
+      if (style === 'warning' || style === 'information') rule.errorStyle = style;
+      const error = optStr(input, 'error_message');
+      if (error) rule.error = error;
+      const prompt = optStr(input, 'input_message');
+      if (prompt) rule.prompt = prompt;
+      applyDataValidation(ctx.wb, sheet.name, rangeOf(text), rule);
+      return { rules: sheet.validations.length, invalid_cells: invalidCells(ctx.wb, sheet.name, 20).map((c) => formatAddress(c.row, c.col)) };
+    },
+  },
+  {
+    name: 'list_data_validations',
+    description: 'Lists the data validation rules of a sheet and cells whose current values violate them.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { sheet: SHEET_PARAM } },
+    run: (ctx, input) => {
+      const sheet = sheetOf(ctx, input);
+      return { rules: sheet.validations, invalid_cells: invalidCells(ctx.wb, sheet.name, 100).map((c) => formatAddress(c.row, c.col)) };
     },
   },
   {

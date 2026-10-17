@@ -1984,6 +1984,136 @@
         }
       },
       {
+        "name": "sheets_set_data_validation",
+        "displayName": "Sheets: set data validation",
+        "toolReferenceName": "sheets_set_data_validation",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Sets or removes data validation for a range, e.g",
+        "modelDescription": "Sets or removes data validation for a range, e.g. a dropdown list (type \"list\" with values or a source range) or number limits. The range is cut out of existing rules first.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            },
+            "range": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "list",
+                "whole",
+                "decimal",
+                "date",
+                "time",
+                "textLength",
+                "custom",
+                "none"
+              ],
+              "description": "\"none\" removes validation from the range"
+            },
+            "operator": {
+              "type": "string",
+              "enum": [
+                "between",
+                "notBetween",
+                "equal",
+                "notEqual",
+                "greaterThan",
+                "lessThan",
+                "greaterThanOrEqual",
+                "lessThanOrEqual"
+              ],
+              "default": "between"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              },
+              "description": "Allowed values for a list"
+            },
+            "formula1": {
+              "type": "string",
+              "description": "Value, source range (\"=$D$1:$D$9\") or formula; relative references are relative to the top-left cell"
+            },
+            "formula2": {
+              "type": "string",
+              "description": "Maximum for between/notBetween"
+            },
+            "allow_blank": {
+              "type": "boolean",
+              "default": true
+            },
+            "dropdown": {
+              "type": "boolean",
+              "default": true
+            },
+            "error_style": {
+              "type": "string",
+              "enum": [
+                "stop",
+                "warning",
+                "information"
+              ],
+              "default": "stop"
+            },
+            "error_message": {
+              "type": "string"
+            },
+            "input_message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "range",
+            "type"
+          ]
+        }
+      },
+      {
+        "name": "sheets_list_data_validations",
+        "displayName": "Sheets: list data validations",
+        "toolReferenceName": "sheets_list_data_validations",
+        "canBeReferencedInPrompt": true,
+        "userDescription": "Lists the data validation rules of a sheet and cells whose current values violate them.",
+        "modelDescription": "Lists the data validation rules of a sheet and cells whose current values violate them.",
+        "tags": [
+          "spreadsheet",
+          "excel",
+          "csv",
+          "sheets"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path (absolute or workspace-relative) or URI of the .xlsx/.csv file. Defaults to the spreadsheet open in the active Sheets editor."
+            },
+            "sheet": {
+              "type": "string",
+              "description": "Sheet name. Defaults to the active sheet."
+            }
+          }
+        }
+      },
+      {
         "name": "sheets_merge_cells",
         "displayName": "Sheets: merge cells",
         "toolReferenceName": "sheets_merge_cells",

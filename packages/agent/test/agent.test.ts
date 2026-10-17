@@ -144,3 +144,22 @@ describe('replace, visibility and paste options', () => {
     expect([wb.getValue(0, 0, 5), wb.getValue(0, 0, 6), wb.getValue(0, 1, 5), wb.getValue(0, 1, 6)]).toEqual(['green', 'blue', 1, 2]);
   });
 });
+
+describe('data validation tools', () => {
+  it('sets, lists and removes rules', () => {
+    const wb = new Workbook();
+    const agent = new SpreadsheetAgent(wb);
+    agent.execute('write_range', { start: 'A1', values: [['Yes'], ['Maybe'], [5]] });
+    const set = agent.execute('set_data_validation', { range: 'A1:A2', type: 'list', values: ['Yes', 'No'], input_message: 'Pick' });
+    expect(set.result).toEqual({ rules: 1, invalid_cells: ['A2'] });
+    expect(agent.execute('set_data_validation', { range: 'A3', type: 'whole', operator: 'lessThan', formula1: '=3' }).ok).toBe(true);
+    const listed = agent.execute('list_data_validations', {}).result as { rules: unknown[]; invalid_cells: string[] };
+    expect(listed.rules).toEqual([
+      { range: 'A1:A2', type: 'list', formula1: '"Yes,No"', prompt: 'Pick' },
+      { range: 'A3', type: 'whole', operator: 'lessThan', formula1: '3' },
+    ]);
+    expect(listed.invalid_cells).toEqual(['A2', 'A3']);
+    expect(agent.execute('set_data_validation', { range: 'A1:A3', type: 'none' }).result).toEqual({ rules: 0 });
+    expect(agent.execute('set_data_validation', { range: 'A1', type: 'list' }).ok).toBe(false);
+  });
+});
