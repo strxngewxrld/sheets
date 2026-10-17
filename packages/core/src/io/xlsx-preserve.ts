@@ -1,8 +1,8 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { formatAddress, formatRange, parseAddress, parseRange } from '../address.js';
 import { addFutureFunctionPrefixes } from '../formula/rewrite.js';
-import { parseFormula, walk } from '../formula/parser.js';
-import { getFunction } from '../formula/registry.js';
+import { parseFormula } from '../formula/parser.js';
+import { hasUnknownFunctions } from '../formula/scope.js';
 import type { WorkbookData } from '../ops.js';
 import type { CellData } from '../sheet.js';
 import type { Workbook } from '../workbook.js';
@@ -196,10 +196,9 @@ function equivalentPackage(a: Record<string, Uint8Array>, b: Record<string, Uint
 function understandsFormulas(data: WorkbookData): boolean {
   try {
     let supported = true;
+    const names = new Set(Object.keys(data.names ?? {}).map((n) => n.toUpperCase()));
     for (const sheet of data.sheets) for (const cell of Object.values(sheet.cells)) {
-      if (cell.f !== undefined) walk(parseFormula(cell.f), (node) => {
-        if (node.type === 'func' && !getFunction(node.name)) supported = false;
-      });
+      if (cell.f !== undefined && hasUnknownFunctions(parseFormula(cell.f), (name) => names.has(name.toUpperCase()))) supported = false;
     }
     return supported;
   } catch { return false; }

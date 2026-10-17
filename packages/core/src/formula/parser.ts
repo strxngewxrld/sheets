@@ -14,9 +14,9 @@ const BINARY_PRECEDENCE: Record<string, number> = {
 const PERCENT_PRECEDENCE = 6;
 const PREFIX_PRECEDENCE = 7;
 
-/** Strips Excel's future-function prefixes (_xlfn., _xlws.). */
+/** Strips Excel's future-function and parameter prefixes (_xlfn., _xlws., _xlpm.). */
 export function normalizeFunctionName(name: string): string {
-  return name.toUpperCase().replace(/^(_XLFN\.)?(_XLWS\.)?/, '');
+  return name.toUpperCase().replace(/^(_XLFN\.)?(_XLWS\.)?/, '').replace(/^_XLPM\./, '');
 }
 
 export function parseRefPoint(text: string): RefPoint {
@@ -129,7 +129,7 @@ class Parser {
       case 'ref':
         return refTokenToNode(t.text);
       case 'name':
-        return { type: 'name', name: t.text };
+        return { type: 'name', name: t.text.replace(/^_xlpm\./i, '') };
       case 'func':
         return this.call(t);
       case 'lparen': {

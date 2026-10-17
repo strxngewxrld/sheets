@@ -1,6 +1,7 @@
 import { colToName, MAX_COLS, MAX_ROWS, quoteSheetName, splitSheetPrefix } from '../address.js';
 import type { RefPoint } from './ast.js';
-import { parseRefPoint } from './parser.js';
+import { parseFormula, parseRefPoint } from './parser.js';
+import { boundNames } from './scope.js';
 import { tokenize } from './tokenizer.js';
 
 export interface RefToken {
@@ -132,11 +133,18 @@ export function invalidateSheetRefs(formula: string, sheetName: string): string 
 const FUTURE_FUNCTIONS = new Set([
   'XLOOKUP', 'XMATCH', 'IFS', 'SWITCH', 'CONCAT', 'TEXTJOIN', 'MAXIFS', 'MINIFS', 'STDEV.S', 'STDEV.P', 'VAR.S', 'VAR.P',
   'IFNA', 'DAYS', 'FILTER', 'SORT', 'UNIQUE', 'SEQUENCE', 'XOR', 'CEILING.MATH', 'FLOOR.MATH', 'RANK.EQ', 'MODE.SNGL',
-  'PERCENTILE.INC', 'QUARTILE.INC', 'NORM.DIST', 'LET', 'ISOWEEKNUM',
+  'PERCENTILE.INC', 'QUARTILE.INC', 'NORM.DIST', 'LET', 'ISOWEEKNUM', 'LAMBDA', 'MAP', 'BYROW', 'BYCOL', 'REDUCE', 'SCAN',
+  'MAKEARRAY', 'ISOMITTED',
 ]);
+
+function lambdaParams(formula: string): Set<string> {
+  if (!/\b(?:LET|LAMBDA)\s*\(/i.test(formula)) return new Set();
+  try { return boundNames(parseFormula(formula)); } catch { return new Set(); }
+}
 
 export function addFutureFunctionPrefixes(formula: string): string {
   const tokens = tokenize(formula);
+  const params = lambdaParams(formula);
   let out = '';
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
@@ -145,6 +153,8 @@ export function addFutureFunctionPrefixes(formula: string): string {
     if (t.type === 'ref' && tokens[next]?.text === '#') {
       out += `_xlfn.ANCHORARRAY(${t.text})`;
       i = next;
+    } else if ((t.type === 'name' || t.type === 'func') && params.has(t.text.toUpperCase())) {
+      out += `_xlpm.${t.text}`;
     } else if (t.type === 'func' && FUTURE_FUNCTIONS.has(t.text.toUpperCase())) {
       out += `_xlfn.${['FILTER', 'SORT'].includes(t.text.toUpperCase()) ? '_xlws.' : ''}${t.text}`;
     } else out += t.text;
@@ -154,6 +164,6 @@ export function addFutureFunctionPrefixes(formula: string): string {
 
 export function stripFutureFunctionPrefixes(formula: string): string {
   return tokenize(formula)
-    .map((t) => (t.type === 'func' ? t.text.replace(/^(_xlfn\.)?(_xlws\.)?/i, '') : t.text))
+    .map((t) => (t.type === 'func' ? t.text.replace(/^(_xlfn\.)?(_xlws\.)?/i, '').replace(/^_xlpm\./i, '') : t.type === 'name' ? t.text.replace(/^_xlpm\./i, '') : t.text))
     .join('');
 }

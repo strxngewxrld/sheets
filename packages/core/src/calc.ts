@@ -3,6 +3,7 @@ import type { Node } from './formula/ast.js';
 import { deref, evaluate, evaluateCell, isRef, type EvalContext, type Matrix } from './formula/evaluator.js';
 import { parseFormula, walk } from './formula/parser.js';
 import { getFunction } from './formula/registry.js';
+import { boundNames } from './formula/scope.js';
 import type { Sheet } from './sheet.js';
 import { CellError, Err, type Scalar } from './values.js';
 import type { Workbook } from './workbook.js';
@@ -107,6 +108,7 @@ export class CalcEngine {
     if (parsed instanceof CellError) info.parseError = parsed;
     else {
       info.ast = parsed;
+      const bound = boundNames(parsed);
       walk(parsed, (n) => {
         if (n.type === 'cell' || n.type === 'range') {
           const target = n.sheet !== undefined ? this.wb.getSheet(n.sheet) : sheet;
@@ -119,10 +121,13 @@ export class CalcEngine {
             };
             info.rangeRefs.push({ sheetId: target.id, range });
           }
-        } else if (n.type === 'name') info.volatile = true;
-        else if (n.type === 'func') {
+        } else if (n.type === 'name') {
+          if (!bound.has(n.name.toUpperCase())) info.volatile = true;
+        } else if (n.type === 'func') {
           const def = getFunction(n.name);
-          if (!def) info.unsupported = true;
+          if (!def && bound.has(n.name.toUpperCase())) return;
+          if (!def && this.wb.names.has(n.name.toUpperCase())) info.volatile = true;
+          else if (!def) info.unsupported = true;
           else if (def.volatile) info.volatile = true;
         }
       });

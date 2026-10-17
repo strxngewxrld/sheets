@@ -30,10 +30,46 @@ export interface EvalContext {
   /** Parses a reference string (for INDIRECT). */
   parseRef?(ref: string): Node | undefined;
   getSpillRange?(sheet: string, row: number, col: number): RangeAddress | CellError;
+  /** Names bound by LET or LAMBDA parameters (upper-case keys). */
+  readonly locals?: ReadonlyMap<string, EvalValue>;
 }
 
 export interface FunctionContext extends EvalContext {
   evaluate(node: Node): EvalValue;
+}
+
+/**
+ * A function value created by LAMBDA. It is a #CALC! error when it ends up in
+ * a cell, as in Excel, but can be passed to MAP, BYROW, REDUCE, ... or called.
+ */
+export class LambdaValue extends CellError {
+  readonly params: readonly string[];
+  readonly body: Node;
+  readonly scope: EvalContext;
+  constructor(params: readonly string[], body: Node, scope: EvalContext) {
+    super('#CALC!', 'A LAMBDA function needs to be called');
+    this.params = params;
+    this.body = body;
+    this.scope = scope;
+  }
+}
+
+export function isLambda(v: unknown): v is LambdaValue {
+  return v instanceof LambdaValue;
+}
+
+/** Returns a context that additionally binds the given names. */
+export function withLocals(ctx: EvalContext, bindings: Iterable<[string, EvalValue]>): EvalContext {
+  const locals = new Map(ctx.locals ?? []);
+  for (const [name, value] of bindings) locals.set(name.toUpperCase(), value);
+  return Object.assign(Object.create(ctx) as EvalContext, { locals });
+}
+
+/** Calls a LAMBDA with already evaluated arguments. */
+export function callLambda(fn: LambdaValue, args: EvalValue[], ctx: EvalContext): EvalValue {
+  if (args.length > fn.params.length) return Err.VALUE;
+  const caller = Object.assign(Object.create(fn.scope) as EvalContext, { row: ctx.row, col: ctx.col });
+  return evaluate(fn.body, withLocals(caller, fn.params.map((p, i) => [p, args[i] ?? null])));
 }
 
 export function isMatrix(v: EvalValue): v is Matrix {
@@ -230,6 +266,8 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
       return { kind: 'ref', sheet, range: normalizeRange(node.start, node.end) };
     }
     case 'name': {
+      const local = ctx.locals?.get(node.name.toUpperCase());
+      if (local !== undefined) return local;
       const target = ctx.resolveName(node.name);
       if (!target) return Err.NAME;
       return evaluate(target, ctx);
@@ -279,7 +317,14 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
     }
     case 'func': {
       const def = getFunction(node.name);
-      if (!def) return Err.NAME;
+      if (!def) {
+        const fn = ctx.locals?.get(node.name.toUpperCase()) ?? (() => {
+          const target = ctx.resolveName(node.name);
+          return target ? evaluate(target, ctx) : undefined;
+        })();
+        if (!isLambda(fn)) return Err.NAME;
+        return callLambda(fn, node.args.map((a) => (a.type === 'missing' ? null : evaluate(a, ctx))), ctx);
+      }
       const argc = node.args.length;
       if ((def.minArgs !== undefined && argc < def.minArgs) || (def.maxArgs !== undefined && argc > def.maxArgs)) {
         return Err.VALUE;

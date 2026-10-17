@@ -10,8 +10,8 @@ import type { BorderLineStyle, BorderSide, CellBorders, CellStyle, HAlign, VAlig
 import { errorFromCode, scalarToJson, type JsonScalar } from '../values.js';
 import { Workbook } from '../workbook.js';
 import { registerBuiltinFunctions } from '../formula/functions/index.js';
-import { parseFormula, walk } from '../formula/parser.js';
-import { getFunction } from '../formula/registry.js';
+import { parseFormula } from '../formula/parser.js';
+import { hasUnknownFunctions } from '../formula/scope.js';
 import { CONDITIONAL_OPERATORS, type ConditionalFormatRule, type ConditionalOperator } from '../conditional.js';
 import { TABLE_THEMES, type TableTheme } from '../table.js';
 import { applyTint, DEFAULT_THEME, INDEXED_COLORS } from './colors.js';
@@ -400,9 +400,7 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
           const extent = attr(f, 'ref');
           if (ftype === 'array' && extent && parseRange(extent)) {
             try {
-              let supported = true;
-              walk(parseFormula(data.f), (node) => { if (node.type === 'func' && !getFunction(node.name)) supported = false; });
-              if (supported) data.a = extent;
+              if (!hasUnknownFunctions(parseFormula(data.f))) data.a = extent;
             } catch { /* Preserve cached values of unsupported formulas. */ }
           }
         }
