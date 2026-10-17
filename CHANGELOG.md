@@ -13,6 +13,7 @@
 - "Export Sheet as CSV…" command and an in-editor warning when changes could not be saved as XLSX without loss.
 - New agent tools: `replace`, `set_hidden`, `set_data_validation`, `list_data_validations`; `copy_range` can transpose and skip blanks.
 - Much faster reading and saving of large workbooks (e.g. reading 1M cells ~10 s instead of ~44 s, saving a one-cell edit ~15 s instead of ~53 s).
+- Update notice: on startup Sheets checks GitHub Releases for a newer version and links to it (setting `sheets.checkForUpdates`).
 - Fix: hidden checkbox rows in dialogs stayed visible.
 
 ## 0.2.3

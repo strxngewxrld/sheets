@@ -21,6 +21,8 @@ code --install-extension artifacts/sheets-vscode-0.2.3.vsix
 
 Voraussetzungen: VS Code 1.95 oder neuer; zum Entwickeln und Paketieren Node.js 22 oder neuer. Das Paket enthält alle Laufzeitabhängigkeiten.
 
+Beim Start von VS Code prüft Sheets, ob in den GitHub Releases eine neuere Version liegt, und bietet dann einen Link zum Release an. Dabei wird nur die öffentliche GitHub-API abgefragt; es werden keine Daten gesendet. Abschalten lässt sich das mit `sheets.checkForUpdates`.
+
 ## Erste Schritte
 
 - Eine `.xlsx`- oder `.xlsm`-Datei öffnen: Sie erscheint direkt im Sheets-Editor.

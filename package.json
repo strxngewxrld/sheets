@@ -55,7 +55,9 @@
     "Other"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "configurationDefaults": {
       "workbench.editorAssociations": {
@@ -240,6 +242,12 @@
           "type": "boolean",
           "default": true,
           "description": "%configuration.headlessWrites%"
+        },
+        "sheets.checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "%configuration.checkForUpdates%"
         }
       }
     },

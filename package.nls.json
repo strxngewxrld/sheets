@@ -15,5 +15,6 @@
   "command.zoomIn": "Zoom In",
   "command.zoomOut": "Zoom Out",
   "command.zoomReset": "Reset Zoom",
-  "command.exportCsv": "Export Sheet as CSV…"
+  "command.exportCsv": "Export Sheet as CSV…",
+  "configuration.checkForUpdates": "Check GitHub Releases for a newer version of Sheets when VS Code starts."
 }

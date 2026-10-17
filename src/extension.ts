@@ -5,6 +5,7 @@ import { SpreadsheetEditorProvider } from './provider.js';
 import { registerCopilotTools } from './copilot.js';
 import { decodeBytes } from './binary.js';
 import type { CsvExport } from './protocol.js';
+import { checkForUpdates } from './update-check.js';
 
 export interface SheetsApi {
   /** Tool definitions (name, description, JSON schema). */
@@ -60,11 +61,39 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
   );
 
   registerCopilotTools(context, executeTool, () => provider.activeDocument?.uri.path.split('/').pop());
+  void startUpdateCheck(context).catch(() => undefined);
 
   return { tools: TOOL_DEFINITIONS, executeTool };
 }
 
 export function deactivate(): void {}
+
+const SKIPPED_VERSION_KEY = 'sheets.skippedUpdateVersion';
+
+/** Shows a notification when GitHub Releases has a newer version than the installed one. */
+async function startUpdateCheck(context: vscode.ExtensionContext): Promise<void> {
+  if (context.extensionMode === vscode.ExtensionMode.Test) return;
+  if (!vscode.workspace.getConfiguration('sheets').get<boolean>('checkForUpdates', true)) return;
+  const manifest = context.extension.packageJSON as { version: string; repository?: { url?: string } };
+  const de = vscode.env.language.toLowerCase().startsWith('de');
+  await checkForUpdates({
+    current: manifest.version,
+    repositoryUrl: manifest.repository?.url ?? '',
+    fetch,
+    skipped: context.globalState.get<string>(SKIPPED_VERSION_KEY),
+    async notify(release) {
+      const open = de ? 'Release öffnen' : 'Open Release';
+      const skip = de ? 'Diese Version überspringen' : 'Skip This Version';
+      const message = de
+        ? `Sheets ${release.version} ist verfügbar (installiert: ${manifest.version}).`
+        : `Sheets ${release.version} is available (installed: ${manifest.version}).`;
+      const choice = await vscode.window.showInformationMessage(message, open, skip);
+      return choice === open ? 'open' : choice === skip ? 'skip' : undefined;
+    },
+    open: (url) => void vscode.env.openExternal(vscode.Uri.parse(url, true)),
+    skip: (version) => void context.globalState.update(SKIPPED_VERSION_KEY, version),
+  });
+}
 
 /** Exports the active sheet of the active Sheets editor as CSV or TSV. */
 async function exportCsv(): Promise<void> {
