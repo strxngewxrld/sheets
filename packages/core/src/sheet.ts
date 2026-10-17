@@ -20,6 +20,21 @@ export interface Cell {
   spillRange?: RangeAddress;
 }
 
+/** A cell note (Excel comment), shown read-only. */
+export interface CellNote {
+  author?: string;
+  text: string;
+}
+
+/** A hyperlink stored on a cell: an external target or a location in the workbook. */
+export interface CellLink {
+  /** External address, e.g. "https://example.com" or "mailto:a@b.c". */
+  target?: string;
+  /** Location in the workbook, e.g. "Sheet2!A1" or a defined name. */
+  location?: string;
+  tooltip?: string;
+}
+
 /** Serializable cell content. */
 export interface CellData {
   v?: JsonScalar;
@@ -41,6 +56,10 @@ export interface SheetData {
   conditionalFormats?: ConditionalFormatRule[];
   tables?: SheetTable[];
   validations?: DataValidation[];
+  /** Notes keyed by A1 address. */
+  notes?: Record<string, CellNote>;
+  /** Hyperlinks keyed by A1 address. */
+  links?: Record<string, CellLink>;
   defaultColWidth?: number;
   defaultRowHeight?: number;
 }
@@ -62,6 +81,9 @@ export class Sheet {
   conditionalFormats: ConditionalFormatRule[] = [];
   tables: SheetTable[] = [];
   validations: DataValidation[] = [];
+  /** Notes and hyperlinks keyed by cellKey(row, col). */
+  readonly notes = new Map<number, CellNote>();
+  readonly links = new Map<number, CellLink>();
   defaultColWidth = DEFAULT_COL_WIDTH;
   defaultRowHeight = DEFAULT_ROW_HEIGHT;
   private usedCache: RangeAddress | null | undefined;
@@ -161,6 +183,9 @@ export class Sheet {
     if (this.conditionalFormats.length) data.conditionalFormats = structuredClone(this.conditionalFormats);
     if (this.tables.length) data.tables = structuredClone(this.tables);
     if (this.validations.length) data.validations = structuredClone(this.validations);
+    const byAddress = <T>(map: Map<number, T>) => Object.fromEntries([...map].map(([key, v]) => { const a = keyToAddress(key); return [formatAddress(a.row, a.col), structuredClone(v)]; }));
+    if (this.notes.size) data.notes = byAddress(this.notes);
+    if (this.links.size) data.links = byAddress(this.links);
     if (this.defaultColWidth !== DEFAULT_COL_WIDTH) data.defaultColWidth = this.defaultColWidth;
     if (this.defaultRowHeight !== DEFAULT_ROW_HEIGHT) data.defaultRowHeight = this.defaultRowHeight;
     return data;
@@ -192,6 +217,12 @@ export class Sheet {
     sheet.conditionalFormats = structuredClone(data.conditionalFormats ?? []);
     sheet.tables = structuredClone(data.tables ?? []);
     sheet.validations = structuredClone(data.validations ?? []);
+    for (const [map, entries] of [[sheet.notes, data.notes], [sheet.links, data.links]] as const) {
+      for (const [addr, v] of Object.entries(entries ?? {})) {
+        const a = parseAddress(addr);
+        if (a) (map as Map<number, unknown>).set(cellKey(a.row, a.col), structuredClone(v));
+      }
+    }
     if (data.defaultColWidth) sheet.defaultColWidth = data.defaultColWidth;
     if (data.defaultRowHeight) sheet.defaultRowHeight = data.defaultRowHeight;
     return sheet;

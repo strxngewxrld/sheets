@@ -1,6 +1,7 @@
 import {
   applyBorders,
   applyDataValidation,
+  cellKey,
   applyStyle,
   CHART_TYPES,
   clearRange,
@@ -41,6 +42,7 @@ import {
   unmergeCells,
   updateChart,
   invalidCells,
+  validationAt,
   VALIDATION_OPERATORS,
   VALIDATION_TYPES,
   walk,
@@ -804,6 +806,9 @@ export const TOOLS: ToolImpl[] = [
         spillParent: cell?.spillParent !== undefined ? (() => { const p = keyToAddress(cell.spillParent); return formatAddress(p.row, p.col); })() : null,
         precedents,
         dependents,
+        ...(sheet.notes.has(cellKey(row, col)) ? { note: sheet.notes.get(cellKey(row, col)) } : {}),
+        ...(sheet.links.has(cellKey(row, col)) ? { link: sheet.links.get(cellKey(row, col)) } : {}),
+        ...(validationAt(sheet, row, col) ? { validation: validationAt(sheet, row, col) } : {}),
       };
     },
   },

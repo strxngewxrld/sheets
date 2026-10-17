@@ -5,7 +5,7 @@ import { newChartId } from '../chart.js';
 import { dateToSerial, timeToSerial } from '../dates.js';
 import { shiftFormula, stripFutureFunctionPrefixes } from '../formula/rewrite.js';
 import type { WorkbookData } from '../ops.js';
-import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, type CellData, type SheetData } from '../sheet.js';
+import { DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, type CellData, type CellLink, type CellNote, type SheetData } from '../sheet.js';
 import type { BorderLineStyle, BorderSide, CellBorders, CellStyle, HAlign, VAlign } from '../style.js';
 import { errorFromCode, scalarToJson, type JsonScalar } from '../values.js';
 import { Workbook } from '../workbook.js';
@@ -65,6 +65,54 @@ class Package {
     }
     return out;
   }
+  /** Target of an external relationship (e.g. a hyperlink URL). */
+  externalTarget(part: string, id: string): string | undefined {
+    const doc = this.xml(relsPathFor(part));
+    const r = arr(doc?.Relationships?.Relationship).find((x) => attr(x, 'Id') === id && attr(x, 'TargetMode') === 'External');
+    return r ? attr(r, 'Target') : undefined;
+  }
+}
+
+/** Hyperlinks of a worksheet; ranges link every cell (up to a sane limit). */
+function readLinks(pkg: Package, path: string, ws: XNode): Record<string, CellLink> {
+  const out: Record<string, CellLink> = {};
+  for (const node of arr(ws.hyperlinks?.hyperlink)) {
+    const range = parseRange(attr(node, 'ref') ?? '')?.range;
+    if (!range) continue;
+    const link: CellLink = {};
+    const id = attr(node, 'id');
+    const target = id ? pkg.externalTarget(path, id) : undefined;
+    if (target) link.target = target;
+    const location = attr(node, 'location');
+    if (location) link.location = location;
+    const tooltip = attr(node, 'tooltip');
+    if (tooltip) link.tooltip = decodeOoxmlEscapes(tooltip);
+    if (!link.target && !link.location) continue;
+    let count = 0;
+    for (let r = range.start.row; r <= range.end.row && count < 10_000; r++) {
+      for (let c = range.start.col; c <= range.end.col && count < 10_000; c++, count++) out[formatAddress(r, c)] = { ...link };
+    }
+  }
+  return out;
+}
+
+/** Notes (legacy comments, also the fallback of threaded comments) of a worksheet. */
+function readNotes(pkg: Package, path: string): Record<string, CellNote> {
+  const out: Record<string, CellNote> = {};
+  for (const rel of pkg.rels(path).values()) {
+    if (!rel.type.endsWith('/comments')) continue;
+    const doc = pkg.xml(rel.target)?.comments;
+    const authors = arr(doc?.authors?.author).map((a) => text(a));
+    for (const c of arr(doc?.commentList?.comment)) {
+      const ref = attr(c, 'ref');
+      if (!ref || !parseAddress(ref)) continue;
+      const note: CellNote = { text: decodeOoxmlEscapes(collectText(c.text)) };
+      const author = authors[Number(attr(c, 'authorId') ?? -1)];
+      if (author) note.author = author;
+      out[ref] = note;
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +489,10 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
   if (conditional.length) sheet.conditionalFormats = conditional.sort((a, b) => a.priority - b.priority).map((c) => c.rule);
   const validations = readValidations(ws);
   if (validations.length) sheet.validations = validations;
+  const links = readLinks(pkg, path, ws);
+  if (Object.keys(links).length) sheet.links = links;
+  const notes = readNotes(pkg, path);
+  if (Object.keys(notes).length) sheet.notes = notes;
 
   const pane = arr(ws.sheetViews?.sheetView)[0]?.pane;
   if (pane && (attr(pane, 'state') === 'frozen' || attr(pane, 'state') === 'frozenSplit')) {

@@ -496,6 +496,17 @@ export class Workbook {
     }
     sheet.invalidate();
 
+    // Notes and links
+    for (const map of [sheet.notes, sheet.links] as Map<number, unknown>[]) {
+      const items = [...map.entries()];
+      map.clear();
+      for (const [key, v] of items) {
+        const { row, col } = keyToAddress(key);
+        const p = move(isRow ? row : col);
+        if (p !== null) map.set(isRow ? cellKey(p, col) : cellKey(row, p), v);
+      }
+    }
+
     // Sizes
     const sizes = isRow ? sheet.rowHeights : sheet.colWidths;
     const sizeEntries = [...sizes.entries()];

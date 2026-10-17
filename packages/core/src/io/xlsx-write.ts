@@ -193,7 +193,7 @@ class SharedStrings {
   }
 }
 
-function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isActive: boolean, drawingRelId: string | null, tableRelIds: string[] = []): string {
+function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isActive: boolean, drawingRelId: string | null, tableRelIds: string[] = [], linkRelIds = new Map<number, string>()): string {
   const used = sheet.usedRange();
   const parts: string[] = [XML_HEAD, `<worksheet xmlns="${NS_MAIN}" xmlns:r="${NS_R}">`];
   parts.push(`<dimension ref="${used ? formatRange(used) : 'A1'}"/>`);
@@ -290,6 +290,14 @@ function sheetXml(sheet: Sheet, styles: StyleWriter, strings: SharedStrings, isA
     parts.push(`<conditionalFormatting sqref="${escapeXml(rule.range)}">${content}</conditionalFormatting>`);
   });
   if (sheet.validations.length) parts.push(validationsXml(sheet.validations, ''));
+  if (sheet.links.size) {
+    const items = [...sheet.links].sort(([a], [b]) => a - b).map(([key, link]) => {
+      const { row, col } = keyToAddress(key);
+      const id = linkRelIds.get(key);
+      return `<hyperlink ref="${formatAddress(row, col)}"${id ? ` r:id="${id}"` : ''}${link.location ? ` location="${escapeXml(link.location)}"` : ''}${link.tooltip ? ` tooltip="${escapeXml(encodeOoxmlEscapes(link.tooltip))}"` : ''}/>`;
+    });
+    parts.push(`<hyperlinks>${items.join('')}</hyperlinks>`);
+  }
   parts.push('<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
   if (drawingRelId) parts.push(`<drawing r:id="${drawingRelId}"/>`);
   if (tableRelIds.length) parts.push(`<tableParts count="${tableRelIds.length}">${tableRelIds.map((id) => `<tablePart r:id="${id}"/>`).join('')}</tableParts>`);
@@ -414,8 +422,8 @@ function drawingXml(charts: { spec: ChartSpec; relId: string }[]): string {
   );
 }
 
-function relsXml(rels: { id: string; type: string; target: string }[]): string {
-  return XML_HEAD + `<Relationships xmlns="${NS_PKG_R}">${rels.map((r) => `<Relationship Id="${r.id}" Type="${r.type}" Target="${escapeXml(r.target)}"/>`).join('')}</Relationships>`;
+function relsXml(rels: { id: string; type: string; target: string; external?: boolean }[]): string {
+  return XML_HEAD + `<Relationships xmlns="${NS_PKG_R}">${rels.map((r) => `<Relationship Id="${r.id}" Type="${r.type}" Target="${escapeXml(r.target)}"${r.external ? ' TargetMode="External"' : ''}/>`).join('')}</Relationships>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,8 +458,15 @@ function writeFreshXlsx(wb: Workbook, options: XlsxWriteOptions): Uint8Array {
   let tableNo = 0;
 
   wb.sheets.forEach((sheet, i) => {
-    const sheetRels: { id: string; type: string; target: string }[] = [];
+    const sheetRels: { id: string; type: string; target: string; external?: boolean }[] = [];
     const tableRelIds: string[] = [];
+    const linkRelIds = new Map<number, string>();
+    for (const [key, link] of sheet.links) {
+      if (!link.target) continue;
+      const id = `rIdLink${linkRelIds.size + 1}`;
+      linkRelIds.set(key, id);
+      sheetRels.push({ id, type: `${REL}/hyperlink`, target: link.target, external: true });
+    }
     const sheetPath = `xl/worksheets/sheet${i + 1}.xml`;
     let drawingRelId: string | null = null;
     if (sheet.charts.length) {
@@ -489,7 +504,7 @@ function writeFreshXlsx(wb: Workbook, options: XlsxWriteOptions): Uint8Array {
       overrides.push(`<Override PartName="/xl/tables/table${tableNo}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>`);
     }
     if (sheetRels.length) put(`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, relsXml(sheetRels));
-    put(sheetPath, sheetXml(sheet, styles, strings, i === wb.activeSheetIndex, drawingRelId, tableRelIds));
+    put(sheetPath, sheetXml(sheet, styles, strings, i === wb.activeSheetIndex, drawingRelId, tableRelIds, linkRelIds));
     overrides.push(`<Override PartName="/${sheetPath}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`);
     wbRels.push({ id: `rId${i + 1}`, type: `${REL}/worksheet`, target: `worksheets/sheet${i + 1}.xml` });
   });
