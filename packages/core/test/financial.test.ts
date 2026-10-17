@@ -104,6 +104,55 @@ describe('financial functions', () => {
 
   it('exposes metadata for autocomplete and function discovery', () => {
     expect(listFunctions().filter((f) => f.category === 'financial').map((f) => f.name))
-      .toEqual(['FV', 'IPMT', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV']);
+      .toEqual(['FV', 'IPMT', 'IRR', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV', 'RATE', 'XIRR']);
+  });
+});
+
+describe('rates of return', () => {
+  it.each([
+    ['=IRR({-70000,12000,15000,18000,21000,26000})', 0.0866309480365316],
+    ['=IRR({-70000,12000,15000,18000,21000})', -0.0212448482734109],
+    ['=IRR({-70000,12000,15000}, -0.1)', -0.4435069413346234],
+    ['=RATE(4*12,-200,8000)', 0.00770147248820165],
+    ['=RATE(10,-1000,0,12000,1)', 0.0328938967426282],
+  ])('matches the reference result of %s', (formula, expected) => {
+    expect(evaluate(formula)).toBeCloseTo(expected, 7);
+  });
+
+  it('computes XIRR for dated cash flows and rejects invalid input', () => {
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [
+      [-10000, '=DATE(2008,1,1)'],
+      [2750, '=DATE(2008,3,1)'],
+      [4250, '=DATE(2008,10,30)'],
+      [3250, '=DATE(2009,2,15)'],
+      [2750, '=DATE(2009,4,1)'],
+    ]);
+    expect(wb.evaluate('=XIRR(A1:A5,B1:B5)')).toBeCloseTo(0.373362535, 7);
+    expect((wb.evaluate('=XIRR(A1:A4,B1:B5)') as CellError).code).toBe('#NUM!');
+    expect((wb.evaluate('=IRR({1,2,3})') as CellError).code).toBe('#NUM!');
+  });
+});
+
+describe('AGGREGATE and HYPERLINK', () => {
+  it('aggregates while optionally ignoring errors', () => {
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [[3], ['=1/0'], [5], [1], ['x']]);
+    expect((wb.evaluate('=AGGREGATE(9,4,A1:A5)') as CellError).code).toBe('#DIV/0!');
+    expect(wb.evaluate('=AGGREGATE(9,6,A1:A5)')).toBe(9);
+    expect(wb.evaluate('=AGGREGATE(4,6,A1:A5)')).toBe(5);
+    expect(wb.evaluate('=AGGREGATE(3,6,A1:A5)')).toBe(4);
+    expect(wb.evaluate('=AGGREGATE(12,6,A1:A5)')).toBe(3);
+    expect(wb.evaluate('=AGGREGATE(14,6,A1:A5,2)')).toBe(3);
+    expect(wb.evaluate('=AGGREGATE(15,6,A1:A5,1)')).toBe(1);
+    expect(wb.evaluate('=AGGREGATE(16,6,A1:A5,0.5)')).toBe(3);
+    expect(wb.evaluate('=AGGREGATE(17,6,A1:A5,4)')).toBe(5);
+    expect(wb.evaluate('=AGGREGATE(18,6,{1,2,3,4},0.4)')).toBe(2);
+    expect((wb.evaluate('=AGGREGATE(20,6,A1:A5)') as CellError).code).toBe('#VALUE!');
+  });
+
+  it('shows the friendly name of a link', () => {
+    expect(evaluate('=HYPERLINK("https://example.com")')).toBe('https://example.com');
+    expect(evaluate('=HYPERLINK("https://example.com", "Example")')).toBe('Example');
   });
 });

@@ -1,4 +1,4 @@
-import { Err, isError, type Scalar } from '../../values.js';
+import { Err, isError, type CellError, type Scalar } from '../../values.js';
 import { deref, isMatrix, isRef, toMatrix, toNumber, type EvalValue, type FunctionContext } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
 import {
@@ -30,6 +30,32 @@ function percentileInc(xs: number[], k: number): number {
   const lo = Math.floor(pos);
   const hi = Math.ceil(pos);
   return s[lo]! + (s[hi]! - s[lo]!) * (pos - lo);
+}
+
+function percentileExc(xs: number[], k: number): number {
+  const n = xs.length;
+  if (!n || k <= 0 || k >= 1) bail(Err.NUM);
+  const pos = k * (n + 1) - 1;
+  if (pos < 0 || pos > n - 1) bail(Err.NUM);
+  const s = [...xs].sort((a, b) => a - b);
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return s[lo]! + (s[hi]! - s[lo]!) * (pos - lo);
+}
+
+function modeOf(xs: number[]): number | CellError {
+  const counts = new Map<number, number>();
+  let best: number | null = null;
+  let bestCount = 1;
+  for (const x of xs) {
+    const c = (counts.get(x) ?? 0) + 1;
+    counts.set(x, c);
+    if (c > bestCount) {
+      bestCount = c;
+      best = x;
+    }
+  }
+  return best ?? Err.NA;
 }
 
 function median(xs: number[]): number {
@@ -225,22 +251,42 @@ export const mathFunctions: FunctionDef[] = [
     return agg(numbersOf(refs, ctx), [...scalarsOf(refs, ctx)]);
   }, { minArgs: 2 }),
 
+  def('AGGREGATE', 'math', 'AGGREGATE(function_num, options, ref1, [ref2 | k])', 'Aggregate that can ignore errors (options 2, 3, 6, 7); 1=AVERAGE ... 19=QUARTILE.EXC.', ([fnum, opt, ...refs], ctx) => {
+    const code = Math.trunc(numArg(fnum, ctx));
+    const options = Math.trunc(numArg(opt, ctx, 0));
+    if (code < 1 || code > 19 || options < 0 || options > 7) return Err.VALUE;
+    const skipErrors = (options & 2) !== 0;
+    const withK = code >= 14;
+    if (withK && refs.length !== 2) return Err.VALUE;
+    const data = withK ? refs.slice(0, 1) : refs;
+    const xs: number[] = [];
+    const all: Scalar[] = [];
+    for (const v of scalarsOf(data, ctx)) {
+      if (isError(v)) { if (skipErrors) continue; return v; }
+      all.push(v);
+      if (typeof v === 'number') xs.push(v);
+    }
+    if (code <= 11) return AGGREGATES[code]!(xs, all);
+    if (code === 12) return median(xs);
+    if (code === 13) return modeOf(xs);
+    const k = numArg(refs[1], ctx);
+    const sorted = [...xs].sort((a, b) => a - b);
+    switch (code) {
+      case 14: case 15: {
+        const i = Math.ceil(k);
+        if (i < 1 || i > sorted.length) return Err.NUM;
+        return code === 14 ? sorted[sorted.length - i]! : sorted[i - 1]!;
+      }
+      case 16: return percentileInc(xs, k);
+      case 17: return Number.isInteger(k) && k >= 0 && k <= 4 ? percentileInc(xs, k / 4) : Err.NUM;
+      case 18: return percentileExc(xs, k);
+      default: return Number.isInteger(k) && k >= 1 && k <= 3 ? percentileExc(xs, k / 4) : Err.NUM;
+    }
+  }, { minArgs: 3 }),
+
   // Statistics
   def('MEDIAN', 'statistical', 'MEDIAN(number1, [number2], ...)', 'Median.', (args, ctx) => median(numbersOf(args, ctx)), { minArgs: 1 }),
-  def('MODE', 'statistical', 'MODE(number1, [number2], ...)', 'Most frequent value.', (args, ctx) => {
-    const counts = new Map<number, number>();
-    let best: number | null = null;
-    let bestCount = 1;
-    for (const x of numbersOf(args, ctx)) {
-      const c = (counts.get(x) ?? 0) + 1;
-      counts.set(x, c);
-      if (c > bestCount) {
-        bestCount = c;
-        best = x;
-      }
-    }
-    return best ?? Err.NA;
-  }, { minArgs: 1 }),
+  def('MODE', 'statistical', 'MODE(number1, [number2], ...)', 'Most frequent value.', (args, ctx) => modeOf(numbersOf(args, ctx)), { minArgs: 1 }),
   ...(['STDEV', 'STDEV.S'] as const).map((n) => def(n, 'statistical', `${n}(number1, ...)`, 'Sample standard deviation.', (args, ctx) => Math.sqrt(variance(numbersOf(args, ctx), true)), { minArgs: 1 })),
   ...(['STDEVP', 'STDEV.P'] as const).map((n) => def(n, 'statistical', `${n}(number1, ...)`, 'Population standard deviation.', (args, ctx) => Math.sqrt(variance(numbersOf(args, ctx), false)), { minArgs: 1 })),
   ...(['VAR', 'VAR.S'] as const).map((n) => def(n, 'statistical', `${n}(number1, ...)`, 'Sample variance.', (args, ctx) => variance(numbersOf(args, ctx), true), { minArgs: 1 })),

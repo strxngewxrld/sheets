@@ -85,6 +85,10 @@ function textAround(before: boolean): EagerFunctionDef['impl'] {
 }
 
 export const textFunctions: FunctionDef[] = [
+  def('HYPERLINK', 'text', 'HYPERLINK(link_location, [friendly_name])', 'Creates a link; the cell shows the friendly name or the address.', ([l, n], ctx) => {
+    const link = textArg(l, ctx);
+    return n === undefined ? link : (deref(n, ctx) as Scalar);
+  }, { minArgs: 1, maxArgs: 2 }),
   def('TEXTSPLIT', 'text', 'TEXTSPLIT(text, col_delimiter, [row_delimiter], [ignore_empty], [match_mode], [pad_with])', 'Splits text into columns and rows at the given delimiters.', ([t, cd, rd, ie, mode, pad], ctx) => {
     const text = textArg(t, ctx);
     const colDelims = delimiters(cd, ctx);
