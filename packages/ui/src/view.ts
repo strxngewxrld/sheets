@@ -20,6 +20,10 @@ import {
   insertRows,
   inputToCellData,
   isDateFormat,
+  isValidValue,
+  scalarFromJson,
+  validationAt,
+  validationListValues,
   isError,
   keyToAddress,
   MAX_COLS,
@@ -49,12 +53,13 @@ import {
   type FormatLocale,
   type PasteSpecial,
   type RangeAddress,
+  type Scalar,
   type Sheet,
   type StylePatch,
   type Workbook,
 } from '@sheets/core';
 import { ChartLayer } from './chart-layer.js';
-import { closeAnalysisDialog, openCellFormatDialog, openConditionalDialog, openPasteSpecialDialog, openPivotDialog, openSortDialog, openTableFormatDialog, openTableFilterDialog } from './analysis-dialogs.js';
+import { closeAnalysisDialog, openCellFormatDialog, openConditionalDialog, openPasteSpecialDialog, openPivotDialog, openSortDialog, openTableFormatDialog, openTableFilterDialog, openValidationDialog } from './analysis-dialogs.js';
 import { currentRegion, resolveSortContext } from './sheet-actions.js';
 export { currentRegion } from './sheet-actions.js';
 import type { ChartTheme } from './charts.js';
@@ -164,6 +169,11 @@ export class SpreadsheetView {
   private findDialog: FindDialog | null = null;
   private zoom = 1;
   private zoomLabel?: HTMLButtonElement;
+  private tip!: HTMLDivElement;
+  /** An alert from data validation is open (it stays until answered). */
+  private alertOpen = false;
+  private validationButton!: HTMLButtonElement;
+  private skipValidation = false;
 
   constructor(container: HTMLElement, workbook: Workbook, options: SpreadsheetViewOptions = {}) {
     injectStyles(container.ownerDocument);
@@ -310,7 +320,7 @@ export class SpreadsheetView {
     closeAnalysisDialog(this.root);
     const sheet = this.wb.getSheet(nameOrIndex);
     if (!sheet) return;
-    if (this.editor.editing) this.commitEdit();
+    if (this.editor.editing && !this.commitEdit()) return;
     this.wb.activeSheetIndex = this.wb.sheets.indexOf(sheet);
     this.geoDirty = true;
     this.extentRows = 200;
@@ -438,6 +448,28 @@ export class SpreadsheetView {
       () => this.scheduleRender(),
     );
     this.editor = new CellEditor(this.gridEl);
+    this.tip = document.createElement('div');
+    this.tip.className = 'sx-validation-tip';
+    this.tip.hidden = true;
+    this.tip.addEventListener('mousedown', (e) => e.stopPropagation());
+    this.tip.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.tip.querySelector('button')?.click();
+      }
+    });
+    this.validationButton = document.createElement('button');
+    this.validationButton.type = 'button';
+    this.validationButton.className = 'sx-validation-btn';
+    this.validationButton.textContent = '▾';
+    this.validationButton.title = this.strings.chooseValue;
+    this.validationButton.setAttribute('aria-label', this.strings.chooseValue);
+    this.validationButton.setAttribute('aria-haspopup', 'menu');
+    this.validationButton.hidden = true;
+    this.validationButton.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    this.validationButton.addEventListener('click', () => this.openValidationList());
+    this.gridEl.append(this.tip, this.validationButton);
     this.bindGrid();
     this.bindKeyboard();
 
@@ -783,6 +815,7 @@ export class SpreadsheetView {
     const merge = sheet.mergeAt(ec.row, ec.col);
     const rect = vp.rect(merge ?? { start: ec, end: ec });
     this.editor.place(rect, sheet.getCell(ec.row, ec.col)?.style, this.theme, width, this.zoom);
+    this.renderValidationUi();
 
     if (this.chartsDirty) {
       this.charts.update(true);
@@ -1089,23 +1122,161 @@ export class SpreadsheetView {
     this.renderNow();
   }
 
-  commitEdit(move?: [number, number]): void {
-    if (!this.editor.editing) return;
+  /** Ends editing and writes the input; returns false if data validation keeps the editor open. */
+  commitEdit(move?: [number, number]): boolean {
+    if (!this.editor.editing) return true;
     const text = this.editor.value;
     const { row, col } = this.editor.cell;
     const changed = text !== this.editor.original;
+    if (changed && !this.skipValidation && !this.acceptInput(row, col, text, move)) return false;
+    this.skipValidation = false;
     this.editor.end();
     if (changed) this.mutate(() => setCellInput(this.wb, this.sheet.name, row, col, text));
     if (move) this.move(move[0], move[1], false);
     this.focus();
     this.scheduleRender();
+    return true;
   }
 
   cancelEdit(): void {
     if (!this.editor.editing) return;
+    this.hideTip(true);
     this.editor.end();
     this.focus();
     this.scheduleRender();
+  }
+
+  // =========================================================================
+  // Data validation
+  // =========================================================================
+
+  /** Checks typed input against the cell's rule; shows the rule's alert if it is invalid. */
+  private acceptInput(row: number, col: number, text: string, move?: [number, number]): boolean {
+    const rule = validationAt(this.sheet, row, col);
+    if (!rule || rule.showError === false) return true;
+    const data = inputToCellData(text, this.sheet.getCell(row, col)?.style, this.locale);
+    let value: Scalar = data?.v === undefined ? null : scalarFromJson(data.v);
+    if (data?.f !== undefined) value = this.wb.calc.evaluateFormula(`=${data.f}`, this.sheet, row, col);
+    if (isValidValue(this.wb, this.sheet, rule, row, col, value)) return true;
+    const s = this.strings;
+    const style = rule.errorStyle ?? 'stop';
+    const title = rule.errorTitle || s.invalidTitle;
+    const message = rule.error || s.invalidValue;
+    if (style === 'information') {
+      this.showTip('info', title, message, [{ label: s.ok, primary: true, action: () => this.hideTip(true) }]);
+      return true;
+    }
+    const keepEditing = () => { this.hideTip(true); this.editor.activeInput.focus(); };
+    if (style === 'warning') {
+      this.showTip('warning', title, message, [
+        { label: s.editValue, action: keepEditing },
+        { label: s.continueAnyway, primary: true, action: () => { this.hideTip(true); this.skipValidation = true; this.commitEdit(move); } },
+      ]);
+    } else {
+      this.showTip('error', title, message, [
+        { label: s.cancel, action: () => this.cancelEdit() },
+        { label: s.retry, primary: true, action: () => { keepEditing(); this.editor.activeInput.select(); } },
+      ]);
+    }
+    return false;
+  }
+
+  /** Shows a message below the active cell (input message or validation alert). */
+  private showTip(kind: 'prompt' | 'info' | 'warning' | 'error', title: string, message: string, actions: { label: string; primary?: boolean; action: () => void }[] = []): void {
+    const tip = this.tip;
+    tip.className = `sx-validation-tip sx-tip-${kind}`;
+    tip.setAttribute('role', kind === 'prompt' ? 'tooltip' : 'alertdialog');
+    const heading = document.createElement('strong');
+    heading.textContent = title;
+    const body = document.createElement('div');
+    body.textContent = message;
+    tip.replaceChildren(...(title ? [heading] : []), body);
+    if (actions.length) {
+      const bar = document.createElement('div');
+      bar.className = 'sx-actions';
+      for (const a of actions) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = a.label;
+        if (a.primary) b.className = 'sx-primary';
+        b.addEventListener('mousedown', (e) => e.stopPropagation());
+        b.addEventListener('click', a.action);
+        bar.append(b);
+      }
+      tip.append(bar);
+      this.alertOpen = true;
+    }
+    tip.hidden = false;
+    this.placeTip();
+    if (actions.length) (tip.querySelector('.sx-primary') as HTMLButtonElement | null)?.focus();
+  }
+
+  private hideTip(alerts = false): void {
+    if (this.alertOpen && !alerts) return;
+    this.alertOpen = false;
+    if (this.tip) this.tip.hidden = true;
+  }
+
+  private placeTip(): void {
+    if (this.tip.hidden) return;
+    const cell = this.editor.editing ? this.editor.cell : this.active;
+    const rect = this.vp.rect(this.sheet.mergeAt(cell.row, cell.col) ?? { start: cell, end: cell });
+    const width = this.tip.offsetWidth || 240;
+    this.tip.style.left = `${Math.max(4, Math.min(rect.x, this.vp.width - width - 8))}px`;
+    const below = rect.y + rect.h + 4;
+    this.tip.style.top = `${below + this.tip.offsetHeight > this.vp.height ? Math.max(4, rect.y - this.tip.offsetHeight - 4) : below}px`;
+  }
+
+  /** Dropdown arrow for list rules and the input message of the active cell. */
+  private renderValidationUi(): void {
+    const button = this.validationButton;
+    const { row, col } = this.active;
+    const rule = validationAt(this.sheet, row, col);
+    const list = rule?.type === 'list' && rule.dropdown !== false && !this.options.readOnly && !this.editor.editing;
+    button.hidden = !list;
+    if (list) {
+      const merge = this.sheet.mergeAt(row, col);
+      const rect = this.vp.rect(merge ?? { start: this.active, end: this.active });
+      const size = Math.max(14, Math.min(20, rect.h));
+      button.style.left = `${rect.x + rect.w + 1}px`;
+      button.style.top = `${rect.y + rect.h - size}px`;
+      button.style.height = `${size}px`;
+      button.hidden = rect.w <= 0 || rect.x + rect.w > this.vp.width - 4 || rect.y < this.vp.headerH;
+    }
+    if (this.alertOpen) {
+      this.placeTip();
+      return;
+    }
+    if (!this.editor.editing && rule && rule.showPrompt !== false && (rule.prompt || rule.promptTitle)) {
+      const key = `${this.sheet.id}:${row}:${col}`;
+      if (this.tip.hidden || this.tip.dataset.cell !== key) {
+        this.showTip('prompt', rule.promptTitle ?? '', rule.prompt ?? '');
+        this.tip.dataset.cell = key;
+      } else this.placeTip();
+    } else this.hideTip();
+  }
+
+  /** Opens the value list of the active cell's list rule. */
+  private openValidationList(): void {
+    if (this.options.readOnly || this.editor.editing) return;
+    const { row, col } = this.active;
+    const rule = validationAt(this.sheet, row, col);
+    if (rule?.type !== 'list') return;
+    const values = validationListValues(this.wb, this.sheet, rule, row, col);
+    const rect = this.validationButton.getBoundingClientRect();
+    const grid = this.gridEl.getBoundingClientRect();
+    const cell = this.vp.rect({ start: this.active, end: this.active });
+    const name = this.sheet.name;
+    showMenu(this.root, grid.left + cell.x, (rect.height ? rect.bottom : grid.top + cell.y + cell.h) + 1, values.length
+      ? values.map((v) => ({ label: formatValue(v, undefined, this.locale), action: () => this.mutate(() => setValues(this.wb, name, row, col, [[v as string | number | boolean]], { parse: false })) }))
+      : [{ label: this.strings.chooseValue, disabled: true, action: () => undefined }]);
+  }
+
+  private openValidation(): void {
+    if (this.options.readOnly) return;
+    if (!this.commitEdit()) return;
+    this.charts.closeEditor();
+    openValidationDialog(this.root, this.wb, this.sheet.name, this.selectionRange(), this.active, this.locale, this.strings, () => this.focus());
   }
 
   private styleSelection(patch: StylePatch): void {
@@ -1441,7 +1612,7 @@ export class SpreadsheetView {
     e.preventDefault();
 
     if (y < vp.headerH && x < vp.headerW) {
-      this.commitEdit();
+      if (!this.commitEdit()) return;
       const used = this.sheet.usedRange();
       this.setSelection({ row: 0, col: 0 }, { row: Math.max(used?.end.row ?? 0, 0), col: Math.max(used?.end.col ?? 0, 0) });
       this.focus();
@@ -1452,7 +1623,7 @@ export class SpreadsheetView {
       if (border !== null && !this.options.readOnly) {
         this.drag = { kind: 'resize-col', index: border, start: x, size: vp.geo.cols.size(border) / this.zoom };
       } else {
-        this.commitEdit();
+        if (!this.commitEdit()) return;
         const c = vp.colAt(x);
         const anchorCol = e.shiftKey ? this.anchor.col : c;
         this.setSelection({ row: 0, col: anchorCol }, { row: this.lastRowForSelection(), col: c }, { row: vp.frozenRows ? 0 : vp.rowAt(vp.headerH + vp.frozenH), col: anchorCol });
@@ -1464,7 +1635,7 @@ export class SpreadsheetView {
       if (border !== null && !this.options.readOnly) {
         this.drag = { kind: 'resize-row', index: border, start: y, size: vp.geo.rows.size(border) / this.zoom };
       } else {
-        this.commitEdit();
+        if (!this.commitEdit()) return;
         const r = vp.rowAt(y);
         const anchorRow = e.shiftKey ? this.anchor.row : r;
         this.setSelection({ row: anchorRow, col: 0 }, { row: r, col: this.lastColForSelection() }, { row: anchorRow, col: 0 });
@@ -1480,7 +1651,7 @@ export class SpreadsheetView {
       } else if (this.onFillHandle(x, y)) {
         this.drag = { kind: 'fill', source: this.selectionRange(), target: null };
       } else {
-        this.commitEdit();
+        if (!this.commitEdit()) return;
         const merge = this.sheet.mergeAt(cell.row, cell.col);
         if (e.shiftKey) this.setSelection(this.anchor, cell, this.active);
         else if (merge) this.setSelection(merge.start, merge.end, merge.start);
@@ -1635,6 +1806,7 @@ export class SpreadsheetView {
       { label: s.formatCells, disabled: ro, action: () => this.openCellFormats() },
       { label: s.formatTable, disabled: ro, action: () => this.openTableFormats() },
       { label: s.chart, disabled: ro, action: () => this.insertChart('column') },
+      { label: s.dataValidation, disabled: ro, action: () => this.openValidation() },
       { label: `${s.findReplace}…`, action: () => this.openFind(!ro) },
       'separator',
       { label: s.clearContents, disabled: ro, action: () => this.mutate(() => clearRange(this.wb, name, sel, 'contents')) },
@@ -1827,6 +1999,11 @@ export class SpreadsheetView {
         return;
       }
       return; // let copy/paste/cut reach the clipboard handlers
+    }
+    if (e.altKey && e.key === 'ArrowDown' && validationAt(this.sheet, this.active.row, this.active.col)?.type === 'list') {
+      e.preventDefault();
+      this.openValidationList();
+      return;
     }
     switch (e.key) {
       case 'ArrowUp':

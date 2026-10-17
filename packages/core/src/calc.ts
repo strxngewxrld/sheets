@@ -410,11 +410,29 @@ export class CalcEngine {
     return out;
   }
 
-  /** Evaluates a formula without reducing it to one cell value (ranges stay references). */
-  evaluateRaw(formula: string, sheet: Sheet, row = 0, col = 0): EvalValue {
+  /**
+   * Evaluates a formula without reducing it to one cell value (ranges stay
+   * references). `assume` evaluates as if a cell of this sheet held a value.
+   */
+  evaluateRaw(formula: string, sheet: Sheet, row = 0, col = 0, assume?: { row: number; col: number; value: Scalar }): EvalValue {
     const ast = this.parse(formula.startsWith('=') ? formula.slice(1) : formula);
     if (ast instanceof CellError) return ast;
-    return evaluate(ast, this.contextFor(sheet, row, col));
+    const ctx = this.contextFor(sheet, row, col);
+    if (assume) {
+      const same = (name: string) => name.toUpperCase() === sheet.name.toUpperCase();
+      const { getCell, getRange } = ctx;
+      ctx.getCell = (name, r, c) => (same(name) && r === assume.row && c === assume.col ? assume.value : getCell(name, r, c));
+      ctx.getRange = (name, range) => {
+        const m = getRange(name, range);
+        const { row: r, col: c } = assume;
+        if (same(name) && r >= range.start.row && r <= range.end.row && c >= range.start.col && c <= range.end.col) {
+          const line = m[r - range.start.row];
+          if (line) line[c - range.start.col] = assume.value;
+        }
+        return m;
+      };
+    }
+    return evaluate(ast, ctx);
   }
 
   /** Evaluates an ad-hoc formula in the context of a sheet (not stored). */

@@ -1,4 +1,4 @@
-import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, type StylePatch, type Workbook } from '@sheets/core';
+import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, type StylePatch, type Workbook, applyDataValidation, parseInput, validationAt, type DataValidation, type ValidationOperator, type ValidationType } from '@sheets/core';
 import type { Strings } from './i18n.js';
 import { setTableFilter, tableFilterValue, type SheetTable } from '@sheets/core';
 
@@ -44,6 +44,76 @@ export function openPasteSpecialDialog(root: HTMLElement, s: Strings, apply: (sp
   const skipBlanks = p.field(s.skipBlanks, input('', 'checkbox')); skipBlanks.parentElement!.className = 'sx-check';
   const transpose = p.field(s.transpose, input('', 'checkbox')); transpose.parentElement!.className = 'sx-check';
   p.finish(() => apply({ mode: mode.value as PasteSpecial['mode'] & string, skipBlanks: skipBlanks.checked, transpose: transpose.checked }));
+}
+
+/** Data validation for the selection, prefilled with the rule of the active cell. */
+export function openValidationDialog(root: HTMLElement, wb: Workbook, sheetName: string, range: RangeAddress, active: { row: number; col: number }, locale: FormatLocale, s: Strings, onClose: () => void): void {
+  const p = panel(root, s.dataValidation.replace(/…$/, ''), s, onClose);
+  const current = validationAt(wb.requireSheet(sheetName), active.row, active.col);
+  const type = p.field(s.allow, select([['any', s.anyValue], ['whole', s.vWhole], ['decimal', s.vDecimal], ['list', s.vList], ['date', s.vDate], ['time', s.vTime], ['textLength', s.vTextLength], ['custom', s.vCustom]], current?.type ?? 'list'));
+  const operator = p.field(s.operator, select([['between', s.between], ['notBetween', s.notBetween], ['equal', s.equalTo], ['notEqual', s.notEqualTo], ['greaterThan', s.greaterThan], ['lessThan', s.lessThan], ['greaterThanOrEqual', s.greaterOrEqual], ['lessThanOrEqual', s.lessOrEqual]], current?.operator ?? 'between'));
+  const show = (f: string | undefined, kind: ValidationType) => {
+    if (f === undefined) return '';
+    if (kind === 'list') return /^".*"$/s.test(f) ? f.slice(1, -1).replace(/""/g, '"') : `=${f}`;
+    if ((kind === 'date' || kind === 'time') && /^\d+(\.\d+)?$/.test(f)) return formatValue(Number(f), kind === 'date' ? (locale === LOCALE_DE ? 'dd.mm.yyyy' : 'yyyy-mm-dd') : 'hh:mm', locale);
+    return /^-?\d+(\.\d+)?$/.test(f) ? f.replace('.', locale.decimal) : `=${f}`;
+  };
+  const first = p.field(s.value, input(show(current?.formula1, current?.type ?? 'list')));
+  const second = p.field(s.maximum2, input(show(current?.formula2, current?.type ?? 'list')));
+  const blank = p.field(s.ignoreBlank, input('', 'checkbox')); blank.parentElement!.className = 'sx-check'; blank.checked = current?.allowBlank !== false;
+  const dropdown = p.field(s.inCellDropdown, input('', 'checkbox')); dropdown.parentElement!.className = 'sx-check'; dropdown.checked = current?.dropdown !== false;
+  const promptOn = p.field(s.inputMessage, input('', 'checkbox')); promptOn.parentElement!.className = 'sx-check'; promptOn.checked = current ? current.showPrompt !== false && !!current.prompt : false;
+  const promptTitle = p.field(s.messageTitle, input(current?.promptTitle ?? ''));
+  const prompt = p.field(s.message, input(current?.prompt ?? ''));
+  const errorOn = p.field(s.errorAlert, input('', 'checkbox')); errorOn.parentElement!.className = 'sx-check'; errorOn.checked = current?.showError !== false;
+  const style = p.field(s.errorStyle, select([['stop', s.styleStop], ['warning', s.styleWarning], ['information', s.styleInformation]], current?.errorStyle ?? 'stop'));
+  const errorTitle = p.field(s.messageTitle, input(current?.errorTitle ?? ''));
+  const error = p.field(s.message, input(current?.error ?? ''));
+  const refresh = () => {
+    const kind = type.value;
+    const compared = !['any', 'list', 'custom'].includes(kind);
+    const two = compared && ['between', 'notBetween'].includes(operator.value);
+    operator.parentElement!.hidden = !compared;
+    first.parentElement!.hidden = kind === 'any';
+    first.parentElement!.firstChild!.textContent = kind === 'list' ? s.listSource : kind === 'custom' ? s.customFormula : two ? s.minimum2 : s.value;
+    second.parentElement!.hidden = !two;
+    dropdown.parentElement!.hidden = kind !== 'list';
+    for (const el of [blank, promptOn, errorOn]) el.parentElement!.hidden = kind === 'any';
+    for (const el of [promptTitle, prompt]) el.parentElement!.hidden = kind === 'any' || !promptOn.checked;
+    for (const el of [style, errorTitle, error]) el.parentElement!.hidden = kind === 'any' || !errorOn.checked;
+  };
+  for (const el of [type, operator, promptOn, errorOn]) el.addEventListener('change', refresh);
+  refresh();
+  const formula = (text: string, kind: string): string => {
+    const t = text.trim();
+    if (t.startsWith('=')) return t.slice(1);
+    if (kind === 'list') return `"${t.replace(/"/g, '""')}"`;
+    if (kind === 'custom') return t;
+    const parsed = parseInput(t, locale);
+    if (typeof parsed.value === 'number') return String(parsed.value);
+    throw new Error(`${s.invalidRange}: ${t}`);
+  };
+  p.button(s.clearValidation, () => { applyDataValidation(wb, sheetName, range, null); p.close(); });
+  p.finish(() => {
+    if (type.value === 'any') { applyDataValidation(wb, sheetName, range, null); return; }
+    const kind = type.value as ValidationType;
+    const rule: Omit<DataValidation, 'range'> = { type: kind, formula1: formula(first.value, kind) };
+    if (!['list', 'custom'].includes(kind)) {
+      rule.operator = operator.value as ValidationOperator;
+      if (['between', 'notBetween'].includes(operator.value)) rule.formula2 = formula(second.value, kind);
+    }
+    if (!blank.checked) rule.allowBlank = false;
+    if (kind === 'list' && !dropdown.checked) rule.dropdown = false;
+    if (promptOn.checked) {
+      if (promptTitle.value.trim()) rule.promptTitle = promptTitle.value.trim();
+      if (prompt.value.trim()) rule.prompt = prompt.value.trim();
+    } else if (prompt.value.trim()) { rule.showPrompt = false; rule.prompt = prompt.value.trim(); }
+    if (!errorOn.checked) rule.showError = false;
+    if (style.value !== 'stop') rule.errorStyle = style.value as 'warning' | 'information';
+    if (errorTitle.value.trim()) rule.errorTitle = errorTitle.value.trim();
+    if (error.value.trim()) rule.error = error.value.trim();
+    applyDataValidation(wb, sheetName, range, rule);
+  });
 }
 
 export function closeAnalysisDialog(root: HTMLElement): void {

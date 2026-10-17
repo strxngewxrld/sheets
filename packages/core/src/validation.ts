@@ -1,4 +1,4 @@
-import { parseRange, type RangeAddress } from './address.js';
+import { formatRange, parseRange, type RangeAddress } from './address.js';
 import { toMatrix, type EvalValue } from './formula/evaluator.js';
 import { parseFormula } from './formula/parser.js';
 import { shiftFormula } from './formula/rewrite.js';
@@ -71,6 +71,42 @@ export function validateValidations(rules: DataValidation[]): void {
   }
 }
 
+/** Parts of `a` outside `b` (up to four rectangles). */
+function subtract(a: RangeAddress, b: RangeAddress): RangeAddress[] {
+  if (b.end.row < a.start.row || b.start.row > a.end.row || b.end.col < a.start.col || b.start.col > a.end.col) return [a];
+  const out: RangeAddress[] = [];
+  if (b.start.row > a.start.row) out.push({ start: a.start, end: { row: b.start.row - 1, col: a.end.col } });
+  if (b.end.row < a.end.row) out.push({ start: { row: b.end.row + 1, col: a.start.col }, end: a.end });
+  const top = Math.max(a.start.row, b.start.row), bottom = Math.min(a.end.row, b.end.row);
+  if (b.start.col > a.start.col) out.push({ start: { row: top, col: a.start.col }, end: { row: bottom, col: b.start.col - 1 } });
+  if (b.end.col < a.end.col) out.push({ start: { row: top, col: b.end.col + 1 }, end: { row: bottom, col: a.end.col } });
+  return out;
+}
+
+/**
+ * Sets the rule for a range like Excel's Data Validation dialog: the range is
+ * removed from existing rules and, unless `rule` is null, covered by the new
+ * rule (whose formulas are relative to the range's top-left cell).
+ */
+export function applyDataValidation(wb: Workbook, sheet: string | number, range: RangeAddress, rule: Omit<DataValidation, 'range'> | null, options: ApplyOptions = {}): void {
+  const s = wb.requireSheet(sheet);
+  const rules = s.validations.flatMap((existing) => {
+    const ranges = validationRanges(existing);
+    const rest = ranges.flatMap((r) => subtract(r, range));
+    if (!rest.length) return [];
+    if (rest.length === ranges.length && rest.every((r, i) => r === ranges[i])) return [existing];
+    // Keep formulas anchored to the original top-left cell.
+    const origin = ranges[0]!.start, next = rest[0]!.start;
+    const move = (f: string | undefined) => (f === undefined || /^".*"$/s.test(f) ? f : shiftFormula(f, next.row - origin.row, next.col - origin.col));
+    const updated: DataValidation = { ...existing, range: rest.map((r) => formatRange(r)).join(' ') };
+    if (existing.formula1 !== undefined) updated.formula1 = move(existing.formula1)!;
+    if (existing.formula2 !== undefined) updated.formula2 = move(existing.formula2)!;
+    return [updated];
+  });
+  if (rule) rules.push({ ...rule, range: formatRange(range) });
+  wb.apply({ type: 'setValidations', sheet: s.name, rules }, options);
+}
+
 /** Replaces all data validation rules of a sheet (undoable). */
 export function setDataValidations(wb: Workbook, sheet: string | number, rules: DataValidation[], options: ApplyOptions = {}): void {
   wb.apply({ type: 'setValidations', sheet: wb.requireSheet(sheet).name, rules }, options);
@@ -82,8 +118,8 @@ function formulaAt(rule: DataValidation, formula: string, row: number, col: numb
   return shiftFormula(formula, row - origin.row, col - origin.col);
 }
 
-function evaluateAt(wb: Workbook, sheet: Sheet, rule: DataValidation, formula: string, row: number, col: number): EvalValue {
-  return wb.calc.evaluateRaw(formulaAt(rule, formula, row, col), sheet, row, col);
+function evaluateAt(wb: Workbook, sheet: Sheet, rule: DataValidation, formula: string, row: number, col: number, value?: Scalar): EvalValue {
+  return wb.calc.evaluateRaw(formulaAt(rule, formula, row, col), sheet, row, col, value === undefined ? undefined : { row, col, value });
 }
 
 /** Values offered by a list rule for a cell. */
@@ -118,9 +154,9 @@ function numberOf(v: EvalValue, wb: Workbook, sheet: Sheet, row: number, col: nu
 }
 
 /**
- * Checks a value against a rule as if it were entered in the cell. For custom
- * rules the formula is evaluated with the current workbook state, so callers
- * check after writing the value (see `isCellValid`).
+ * Checks a value against a rule as if it were entered in the cell. Custom
+ * formulas see the value in the cell itself; other formulas that depend on
+ * the cell keep their current results.
  */
 export function isValidValue(wb: Workbook, sheet: string | number | Sheet, rule: DataValidation, row: number, col: number, value: Scalar): boolean {
   const s = typeof sheet === 'object' ? sheet : wb.requireSheet(sheet);
@@ -133,7 +169,7 @@ export function isValidValue(wb: Workbook, sheet: string | number | Sheet, rule:
       return options.some((o) => (typeof o === 'number' && typeof value === 'number' ? o === value : String(o).toLowerCase() === text));
     }
     case 'custom': {
-      const result = evaluateAt(wb, s, rule, rule.formula1 ?? 'FALSE', row, col);
+      const result = evaluateAt(wb, s, rule, rule.formula1 ?? 'FALSE', row, col, value);
       const m = toMatrix(result, wb.calc.contextFor(s, row, col));
       const v = m[0]?.[0] ?? null;
       return v === true || (typeof v === 'number' && v !== 0);

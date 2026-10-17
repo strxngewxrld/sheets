@@ -184,6 +184,17 @@ export const CSS = `
 .sx-dialog .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .sx-dialog .sx-actions button { height: 28px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--sx-input-border); background: var(--sx-input-bg); color: inherit; cursor: pointer; font: inherit; }
 .sx-dialog .sx-actions button.sx-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
+.sx-validation-btn { position: absolute; z-index: 6; width: 18px; padding: 0; border: 1px solid var(--sx-input-border); border-radius: 2px; background: var(--sx-menu-bg); color: var(--sx-fg); font: 11px sans-serif; cursor: pointer; }
+.sx-validation-btn:hover { background: var(--sx-menu-hover); }
+.sx-validation-tip { position: absolute; z-index: 30; max-width: 280px; padding: 8px 10px; border: 1px solid var(--sx-grid); border-radius: 6px; background: var(--sx-menu-bg); color: var(--sx-menu-fg); box-shadow: var(--sx-shadow); font-size: 12px; display: grid; gap: 4px; white-space: pre-wrap; }
+.sx-validation-tip[hidden] { display: none; }
+.sx-validation-tip.sx-tip-prompt { pointer-events: none; background: #FFFFE1; color: #1f1f1f; border-color: #c8c8a0; }
+.sx-validation-tip.sx-tip-error { border-left: 4px solid #C00000; }
+.sx-validation-tip.sx-tip-warning { border-left: 4px solid #D9822B; }
+.sx-validation-tip.sx-tip-info { border-left: 4px solid var(--sx-accent); }
+.sx-validation-tip .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.sx-validation-tip .sx-actions button { height: 26px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--sx-input-border); background: var(--sx-input-bg); color: inherit; cursor: pointer; font: inherit; }
+.sx-validation-tip .sx-actions button.sx-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
 .sx-find-dialog { width: 300px; z-index: 51; }
 .sx-find-dialog [hidden] { display: none; }
 .sx-find-dialog input[aria-invalid=true] { border-color: #C00000; }

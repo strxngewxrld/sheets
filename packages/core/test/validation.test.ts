@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { strFromU8, unzipSync } from 'fflate';
-import { deleteRows, insertRows, invalidCells, isValidValue, readXlsx, setDataValidations, setValues, validationAt, validationListValues, Workbook, writeXlsx, type DataValidation } from '../src/index.js';
+import { applyDataValidation, deleteRows, insertRows, invalidCells, isValidValue, readXlsx, setDataValidations, setValues, validationAt, validationListValues, Workbook, writeXlsx, type DataValidation } from '../src/index.js';
 
 function book(rules: DataValidation[]) {
   const wb = new Workbook();
@@ -49,6 +49,29 @@ describe('data validation', () => {
     const wb = book([{ range: 'B1:B4', type: 'custom', formula1: 'B1<=C1' }]);
     setValues(wb, 0, 0, 1, [[1, 5], [9, 5], [5, 5], [null, 1]]);
     expect(invalidCells(wb, 0)).toEqual([{ row: 1, col: 1 }]);
+  });
+
+  it('checks custom rules as if the value were already in the cell', () => {
+    const wb = book([{ range: 'A1:A5', type: 'custom', formula1: 'COUNTIF($A$1:$A$5,A1)=1' }]);
+    setValues(wb, 0, 0, 0, [['x'], ['y']]);
+    expect(check(wb, 2, 0, 'z')).toBe(true);
+    expect(check(wb, 2, 0, 'x')).toBe(false);
+    expect(check(wb, 0, 0, 'y')).toBe(false);
+    expect(check(wb, 0, 0, 'x')).toBe(true);
+  });
+
+  it('applies a rule to a selection by cutting it out of existing rules', () => {
+    const wb = book([{ range: 'A1:C3', type: 'custom', formula1: 'A1>0' }]);
+    applyDataValidation(wb, 0, { start: { row: 1, col: 1 }, end: { row: 1, col: 1 } }, { type: 'list', formula1: '"a,b"' });
+    expect(wb.activeSheet.validations).toEqual([
+      { range: 'A1:C1 A3:C3 A2 C2', type: 'custom', formula1: 'A1>0' },
+      { range: 'B2', type: 'list', formula1: '"a,b"' },
+    ]);
+    expect(validationAt(wb.activeSheet, 1, 1)?.type).toBe('list');
+    applyDataValidation(wb, 0, { start: { row: 0, col: 0 }, end: { row: 0, col: 2 } }, null);
+    expect(wb.activeSheet.validations[0]).toEqual({ range: 'A3:C3 A2 C2', type: 'custom', formula1: 'A3>0' });
+    expect(isValidValue(wb, 0, validationAt(wb.activeSheet, 2, 2)!, 2, 2, -1)).toBe(false);
+    expect(validationAt(wb.activeSheet, 0, 0)).toBeUndefined();
   });
 
   it('moves ranges and formulas with inserted and deleted rows and undoes rule changes', () => {
