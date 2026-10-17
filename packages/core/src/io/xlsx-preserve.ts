@@ -12,23 +12,47 @@ import { validationsXml } from './xlsx-validations.js';
 import { arr, attr, encodeOoxmlEscapes, escapeXml, parseXml, resolvePath, relsPathFor, text } from './xml.js';
 import { PreservedStyles } from './xlsx-preserve-styles.js';
 import { patchLayout } from './xlsx-preserve-layout.js';
-import { attribute, canonical, child, contents, editXml, nodeAttribute, prefix, protect, raw, setAttribute, setChild, xmlRoot, type XmlEdit, type XmlSpan } from './xlsx-preserve-xml.js';
+import { attribute, canonical, sameValue, child, contents, editXml, nodeAttribute, prefix, protect, raw, setAttribute, setChild, xmlRoot, type XmlEdit, type XmlSpan } from './xlsx-preserve-xml.js';
 
 export function encodeXlsxArchive(bytes: Uint8Array): string {
   const chunks: string[] = [];
   for (let i = 0; i < bytes.length; i += 32768) chunks.push(String.fromCharCode(...bytes.subarray(i, i + 32768)));
   return btoa(chunks.join(''));
 }
+let decoded: { value: string; bytes: Uint8Array } | undefined;
 function decodeArchive(value: string): Uint8Array {
-  const binary = atob(value); return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  // Saving repeatedly decodes the same archive; keep the last result.
+  if (decoded?.value === value) return decoded.bytes;
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  decoded = { value, bytes };
+  return bytes;
 }
 function payload(cell?: CellData): unknown {
   return cell?.f !== undefined ? { f: cell.f, a: cell.a } : { v: cell?.v ?? null, a: cell?.a };
 }
-function model(data: WorkbookData): unknown {
-  const { xlsxSource: _source, activeSheet: _active, ...rest } = data;
-  return { ...rest, sheets: rest.sheets.map((sheet) => ({ ...sheet, cells: Object.fromEntries(Object.entries(sheet.cells).map(([key, cell]) => [key, { ...payload(cell) as object, s: cell.s }]).filter(([, cell]) => canonical(cell) !== canonical({ v: null }))) })) };
+const EMPTY_CELL = { v: null };
+function sameCellContent(a: CellData | undefined, b: CellData | undefined): boolean {
+  if (a === b) return true;
+  const x = a ? { ...payload(a) as object, s: a.s } : EMPTY_CELL, y = b ? { ...payload(b) as object, s: b.s } : EMPTY_CELL;
+  return sameValue(x, y);
 }
+
+/** Whether two workbooks have the same content apart from the archive and active sheet. */
+function sameModel(a: WorkbookData, b: WorkbookData): boolean {
+  const strip = ({ xlsxSource: _source, activeSheet: _active, sheets: _sheets, ...rest }: WorkbookData) => rest;
+  if (!sameValue(strip(a), strip(b)) || a.sheets.length !== b.sheets.length) return false;
+  return a.sheets.every((sa, i) => {
+    const sb = b.sheets[i]!;
+    const { cells: ca, ...ra } = sa, { cells: cb, ...rb } = sb;
+    if (!sameValue(ra, rb)) return false;
+    for (const key in ca) if (!sameCellContent(ca[key], cb[key])) return false;
+    for (const key in cb) if (!(key in ca) && !sameCellContent(undefined, cb[key])) return false;
+    return true;
+  });
+}
+
 function metadata(data: WorkbookData): unknown {
   const { xlsxSource: _source, activeSheet: _active, ...rest } = data;
   return { ...rest, sheets: rest.sheets.map(({ cells: _cells, colWidths: _cols, rowHeights: _rows, validations: _validations, ...sheet }) => sheet) };
@@ -39,6 +63,17 @@ function relations(files: Record<string, Uint8Array>, part: string): { id: strin
     .filter((r) => attr(r, 'TargetMode') !== 'External')
     .map((r) => ({ id: attr(r, 'Id') ?? '', target: resolvePath(part, attr(r, 'Target') ?? ''), type: attr(r, 'Type') ?? '' }));
 }
+/** Shared string items (<si>) that contain more than plain text (<r>, <rPh>, <phoneticPr>). */
+export function richStringIndices(xml: string): Set<number> {
+  const out = new Set<number>();
+  const item = /<(?:[\w.-]+:)?si(?:\s[^>]*)?(\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?si\s*>)/g;
+  let index = 0;
+  for (let m; (m = item.exec(xml)); index++) {
+    if (m[2] && /<(?:[\w.-]+:)?(?:r|rPh|phoneticPr)[\s/>]/.test(m[2])) out.add(index);
+  }
+  return out;
+}
+
 function textValue(value: string): string {
   return escapeXml(encodeOoxmlEscapes(value));
 }
@@ -48,15 +83,15 @@ const AFTER_VALIDATIONS = ['hyperlinks', 'printOptions', 'pageMargins', 'pageSet
 /** Replaces the sheet's <dataValidations>; Excel 2010 rules in extLst cannot be merged safely. */
 function patchValidations(xml: string, before: SheetData, after: SheetData): string {
   const rules = after.validations ?? [];
-  if (canonical(before.validations ?? []) === canonical(rules)) return xml;
+  if (sameValue(before.validations ?? [], rules)) return xml;
   const root = xmlRoot(xml);
   const ext = child(root, 'extLst');
   if (ext && /dataValidations/.test(raw(xml, ext))) protect(`Erweiterte Datenüberprüfung (Excel 2010) in ${before.name}.`);
   return setChild(xml, 'dataValidations', rules.length ? validationsXml(rules, prefix(root)) : '', AFTER_VALIDATIONS);
 }
 
-function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: PreservedStyles | undefined, inheritedStyle: number, richStrings: Set<number>, table?: string): string {
-  const valueChanged = canonical(payload(before)) !== canonical(payload(after));
+function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: PreservedStyles | undefined, inheritedStyle: number, richStrings: { has(index: number): boolean }, table?: string): string {
+  const valueChanged = !sameValue(payload(before), payload(after));
   let result = node ? raw(xml, node) : `<${p}c r="${ref}"/>`;
   let root = xmlRoot(result), open = result.slice(0, root.openEnd);
   if (valueChanged) {
@@ -85,7 +120,7 @@ function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before:
     open = setAttribute(remaining.slice(0, root.openEnd), 't', type);
     result = contents(remaining, root, body + remaining.slice(root.openEnd, root.closeStart), open);
   }
-  if (canonical(before?.s) !== canonical(after?.s)) {
+  if (!sameValue(before?.s, after?.s)) {
     if (!styles) protect('Die Datei enthält keine bearbeitbare Style-Tabelle.');
     root = xmlRoot(result); open = result.slice(0, root.openEnd);
     const index = styles.get(Number(attribute(open, 's') ?? inheritedStyle), before?.s, after?.s);
@@ -94,11 +129,11 @@ function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before:
   return result;
 }
 
-function patchSheet(xml: string, before: WorkbookData['sheets'][number], after: WorkbookData['sheets'][number], styles: PreservedStyles | undefined, date1904: boolean, hasCalcChain: boolean, richStrings: Set<number>, lockedRanges: string[]): string {
+function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][number], after: WorkbookData['sheets'][number], styles: PreservedStyles | undefined, date1904: boolean, hasCalcChain: boolean, richStrings: { has(index: number): boolean }, lockedRanges: string[]): string {
   const changes = [...new Set([...Object.keys(before.cells), ...Object.keys(after.cells)])]
-    .filter((key) => canonical([payload(before.cells[key]), before.cells[key]?.s]) !== canonical([payload(after.cells[key]), after.cells[key]?.s]));
+    .filter((key) => !sameValue([payload(before.cells[key]), before.cells[key]?.s], [payload(after.cells[key]), after.cells[key]?.s]));
   if (!changes.length) return xml;
-  const root = xmlRoot(xml), p = prefix(root);
+  const p = prefix(root);
   if (root.name !== 'worksheet') protect('Nicht unterstützter Blatttyp.');
   if (child(root, 'sheetProtection')) protect(`Blattschutz in ${before.name}.`);
   const data = child(root, 'sheetData'); if (!data) protect('sheetData fehlt.');
@@ -127,7 +162,7 @@ function patchSheet(xml: string, before: WorkbookData['sheets'][number], after: 
   const changedRows = new Map<number, string[]>();
   for (const ref of changes) {
     const a = parseAddress(ref); if (!a) protect('Ungültige Zelladresse im Modell.');
-    const valueChanged = canonical(payload(before.cells[ref])) !== canonical(payload(after.cells[ref]));
+    const valueChanged = !sameValue(payload(before.cells[ref]), payload(after.cells[ref]));
     if (valueChanged) {
       if (lockedRanges.some((ref) => {
         const r = parseRange(ref)?.range;
@@ -181,8 +216,9 @@ function patchSheet(xml: string, before: WorkbookData['sheets'][number], after: 
   let result: string;
   if (data.closeStart === data.openEnd && /\/\s*>$/.test(xml.slice(data.start, data.openEnd))) result = editXml(xml, [{ start: data.start, end: data.end, value: contents(xml, data, [...insertedRows.values()].join('')) }]);
   else result = editXml(xml, [...rowEdits, ...[...insertedRows].map(([start, value]) => ({ start, end: start, value }))]);
-  const dimension = child(xmlRoot(result), 'dimension');
-  if (dimension) {
+  // <dimension> precedes <sheetData>, so its position in the original is unchanged.
+  const dimension = child(root, 'dimension');
+  if (dimension && dimension.end <= data.start) {
     const range = parseRange(nodeAttribute(result, dimension, 'ref') ?? 'A1')?.range;
     if (range) {
       for (const ref of changes) {
@@ -199,7 +235,7 @@ function patchSheet(xml: string, before: WorkbookData['sheets'][number], after: 
 
 /** Allow a complete rebuild only when the original contains exactly our serializer's output. */
 function equivalentPackage(a: Record<string, Uint8Array>, b: Record<string, Uint8Array>): boolean {
-  if (canonical(Object.keys(a).sort()) !== canonical(Object.keys(b).sort())) return false;
+  if (!sameValue(Object.keys(a).sort(), Object.keys(b).sort())) return false;
   return Object.keys(a).every((name) => {
     const aa = a[name]!, bb = b[name]!;
     if (name === 'docProps/core.xml') {
@@ -225,7 +261,7 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
   const source = wb.xlsxSource!;
   if (!source.baseline) protect('Die Import-Basis fehlt.');
   const original = decodeArchive(source.archive), files = unzipSync(original), current = wb.toJSON();
-  if (!source.structuralEdits && canonical(model(current)) === canonical(model(source.baseline))) return original;
+  if (!source.structuralEdits && sameModel(current, source.baseline)) return original;
   if (Object.keys(files).some((name) => /(?:^_xmlsignatures\/|vbaProjectSignature)/i.test(name))) protect('Die Datei enthält digitale Signaturen.');
   const rootRels = relations(files, '');
   const workbookPath = rootRels.find((r) => r.type.endsWith('/officeDocument'))?.target ?? 'xl/workbook.xml';
@@ -234,7 +270,7 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
   const wbRoot = xmlRoot(wbXml);
   const wbRels = relations(files, workbookPath);
   const worksheets = arr(parseXml(wbXml)?.workbook?.sheets?.sheet).map((sheet) => ({ name: attr(sheet, 'name'), rel: wbRels.find((r) => r.id === attr(sheet, 'id')) })).filter((s) => s.rel?.type.endsWith('/worksheet'));
-  const nonCellChanges = canonical(metadata(current)) !== canonical(metadata(source.baseline));
+  const nonCellChanges = !sameValue(metadata(current), metadata(source.baseline));
   if (source.structuralEdits || nonCellChanges) {
     const generatedBaseline = unzipSync(fresh(source.baseline));
     if (!equivalentPackage(files, generatedBaseline) || !understandsFormulas(source.baseline)) protect('Struktur-, Tabellen-, Diagramm- oder Regeländerung mit nicht vollständig modellierten Excel-Inhalten.');
@@ -246,10 +282,13 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
   if (worksheets.length !== current.sheets.length) protect('Nicht übereinstimmende Blattzuordnung.');
   const stylesPath = wbRels.find((r) => r.type.endsWith('/styles'))?.target;
   const stringsPath = wbRels.find((r) => r.type.endsWith('/sharedStrings'))?.target;
-  const richStrings = new Set<number>();
-  if (stringsPath && files[stringsPath]) arr(parseXml(strFromU8(files[stringsPath]!))?.sst?.si).forEach((si, index) => {
-    if (si && typeof si === 'object' && Object.keys(si).some((key) => !key.startsWith('@_') && key !== 't')) richStrings.add(index);
-  });
+  // Indices of shared strings with rich text or phonetic runs, scanned on first use.
+  let richIndices: Set<number> | undefined;
+  const richStrings = { has: (index: number) => {
+    if (index < 0) return false;
+    if (!richIndices) richIndices = stringsPath && files[stringsPath] ? richStringIndices(strFromU8(files[stringsPath]!)) : new Set();
+    return richIndices.has(index);
+  } };
   const styles = stylesPath && files[stylesPath] ? new PreservedStyles(strFromU8(files[stylesPath]!)) : undefined;
   const date1904 = ['1', 'true'].includes(nodeAttribute(wbXml, child(wbRoot, 'workbookPr') ?? wbRoot, 'date1904') ?? '');
   for (let i = 0; i < worksheets.length; i++) {
@@ -274,8 +313,10 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
         if (totals > 0) lockedRanges.push(formatRange({ start: { row: range.end.row - totals + 1, col: range.start.col }, end: range.end }));
       }
     }
-    if (child(xmlRoot(originalSheet), 'sheetProtection') && canonical(before) !== canonical(after)) protect(`Blattschutz in ${before.name}.`);
-    const patched = patchValidations(patchLayout(patchSheet(originalSheet, before, after, styles, date1904, wbRels.some((r) => r.type.endsWith('/calcChain')), richStrings, lockedRanges), before, after), before, after);
+    if (sameValue(before, after)) continue;
+    const originalRoot = xmlRoot(originalSheet);
+    if (child(originalRoot, 'sheetProtection')) protect(`Blattschutz in ${before.name}.`);
+    const patched = patchValidations(patchLayout(patchSheet(originalSheet, originalRoot, before, after, styles, date1904, wbRels.some((r) => r.type.endsWith('/calcChain')), richStrings, lockedRanges), before, after), before, after);
     if (patched !== originalSheet) { xmlRoot(patched); files[entry.rel.target] = strToU8(patched); }
   }
   if (stylesPath && styles) { xmlRoot(styles.xml); files[stylesPath] = strToU8(styles.xml); }

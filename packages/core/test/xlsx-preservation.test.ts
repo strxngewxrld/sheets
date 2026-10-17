@@ -221,3 +221,20 @@ describe('lossless XLSX preservation', () => {
 });
 
 function canonicalBytes(value: Uint8Array): string { return Buffer.from(value).toString('base64'); }
+
+describe('shared string scanning', () => {
+  it('finds rich and phonetic items like a full parse', async () => {
+    const { richStringIndices } = await import('../src/io/xlsx-preserve.js');
+    const { arr, parseXml } = await import('../src/io/xml.js');
+    const xml = '<sst xmlns="ns"><si><t>plain</t></si><si><r><rPr><b/></rPr><t>bold</t></r></si><si/>' +
+      '<si><t xml:space="preserve"> a&lt;r&gt; </t></si><si><t>ふ</t><rPh sb="0" eb="1"><t>フ</t></rPh><phoneticPr fontId="1"/></si>' +
+      '<si><t>&lt;r&gt;</t></si></sst>';
+    const expected = new Set<number>();
+    arr(parseXml(xml)?.sst?.si).forEach((si: unknown, index: number) => {
+      if (si && typeof si === 'object' && Object.keys(si).some((key) => !key.startsWith('@_') && key !== 't')) expected.add(index);
+    });
+    expect([...richStringIndices(xml)]).toEqual([1, 4]);
+    expect([...expected]).toEqual([1, 4]);
+    expect([...richStringIndices('<x:sst xmlns:x="ns"><x:si><x:t>a</x:t></x:si><x:si><x:r><x:t>b</x:t></x:r></x:si></x:sst>')]).toEqual([1]);
+  });
+});

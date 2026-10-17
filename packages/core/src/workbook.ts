@@ -85,13 +85,14 @@ export class Workbook {
     if (this.names.size) data.names = Object.fromEntries([...this.names.values()].map((n) => [n.name, n.ref]));
     if (this.activeSheetIndex) data.activeSheet = this.activeSheetIndex;
     if (this.pivotTables.length) data.pivotTables = structuredClone(this.pivotTables);
-    if (this.xlsxSource) data.xlsxSource = structuredClone(this.xlsxSource);
+    // The archive and import baseline are never mutated; share them instead of deep copies.
+    if (this.xlsxSource) data.xlsxSource = { ...this.xlsxSource };
     return data;
   }
 
   /** Replaces the whole content without history (used by importers). */
   load(data: WorkbookData, options: { recalculate?: boolean } = {}): void {
-    this.xlsxSource = structuredClone(data.xlsxSource);
+    this.xlsxSource = data.xlsxSource ? { ...data.xlsxSource } : undefined;
     this.pivotTables = structuredClone(data.pivotTables ?? []);
     this.sheets = data.sheets.map((s) => Sheet.fromJSON(s));
     if (!this.sheets.length) this.sheets.push(new Sheet('Sheet1'));

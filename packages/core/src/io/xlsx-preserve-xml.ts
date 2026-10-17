@@ -97,6 +97,31 @@ export function setChild(xml: string, name: string, value: string, before: strin
   return editXml(xml, [{ start: position, end: position, value }]);
 }
 
+/**
+ * Structural equality with the same semantics as `canonical(a) === canonical(b)`
+ * (key order and undefined properties are ignored) without building strings.
+ */
+export function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!sameValue(a[i], b[i])) return false;
+    return true;
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
+    let count = 0;
+    for (const key in x) {
+      if (x[key] === undefined) continue;
+      if (y[key] === undefined || !sameValue(x[key], y[key])) return false;
+      count++;
+    }
+    for (const key in y) if (y[key] !== undefined) count--;
+    return count === 0;
+  }
+  return (JSON.stringify(a) ?? 'null') === (JSON.stringify(b) ?? 'null');
+}
+
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
   if (value && typeof value === 'object') return '{' + Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => JSON.stringify(k) + ':' + canonical(v)).join(',') + '}';
