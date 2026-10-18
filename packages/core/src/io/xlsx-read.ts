@@ -175,7 +175,7 @@ class StyleReader {
     this.differentials = arr(ss.dxfs?.dxf).map((dxf) => {
       const style: CellStyle = this.font(dxf.font);
       for (const [key, tag] of [['bold', 'b'], ['italic', 'i'], ['underline', 'u'], ['strike', 'strike']] as const) {
-        if (dxf.font && tag in dxf.font) style[key] = key === 'underline' ? attr(dxf.font[tag], 'val') !== 'none' : flag(dxf.font, tag);
+        if (dxf.font && typeof dxf.font === 'object' && tag in dxf.font) style[key] = key === 'underline' ? attr(dxf.font[tag], 'val') !== 'none' : flag(dxf.font, tag);
       }
       const color = this.color(dxf.font?.color);
       if (color) style.color = color;
@@ -224,7 +224,8 @@ class StyleReader {
 
   private font(f: XNode): Partial<CellStyle> {
     const out: Partial<CellStyle> = {};
-    if (!f) return out;
+    // Empty or whitespace-only elements parse to strings.
+    if (!f || typeof f !== 'object') return out;
     if (flag(f, 'b')) out.bold = true;
     if (flag(f, 'i')) out.italic = true;
     if ('u' in f && attr(f.u, 'val') !== 'none') out.underline = true;
@@ -378,7 +379,8 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
   const source = pkg.text(path);
   const scanned = source ? scanSheetData(source) : null;
   const doc = scanned ? parseXml(source!.slice(0, scanned.start) + source!.slice(scanned.end)) : pkg.xml(path);
-  const ws = doc?.worksheet ?? {};
+  // An element without children or attributes parses to '' (e.g. a worksheet holding only sheetData).
+  const ws = doc?.worksheet && typeof doc.worksheet === 'object' ? doc.worksheet : {};
   if (scanned) ws.sheetData = { row: scanned.rows };
   const sheet: SheetData = { name, cells: {} };
 
@@ -598,7 +600,8 @@ export function xlsxToData(bytes: Uint8Array): WorkbookData {
   const rootRels = pkg.rels('');
   const officeDoc = [...rootRels.values()].find((r) => r.type.endsWith('/officeDocument'))?.target ?? 'xl/workbook.xml';
   const wbDoc = pkg.xml(officeDoc)?.workbook;
-  if (!wbDoc) throw new Error('Not a valid xlsx file: workbook part missing');
+  // An element without children or attributes parses to a string.
+  if (!wbDoc || typeof wbDoc !== 'object') throw new Error('Not a valid xlsx file: workbook part missing');
   const rels = pkg.rels(officeDoc);
 
   const relOfType = (suffix: string) => [...rels.values()].find((r) => r.type.endsWith(suffix))?.target;
