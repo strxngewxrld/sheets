@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import * as vscode from 'vscode';
 import { openWorkbook, saveWorkbook, formatFromFileName, Workbook, writeXlsx } from '@sheets/core';
 import { SpreadsheetAgent, TOOL_DEFINITIONS, type ToolResult } from '@sheets/agent';
@@ -98,13 +101,14 @@ async function startUpdateCheck(context: vscode.ExtensionContext): Promise<void>
           title: de ? `Sheets ${release.version} wird installiert…` : `Installing Sheets ${release.version}…`,
         }, async () => {
           const bytes = await downloadVsix(release.vsix, fetch);
-          const target = vscode.Uri.joinPath(context.globalStorageUri, release.vsix.name);
-          await vscode.workspace.fs.createDirectory(context.globalStorageUri);
-          await vscode.workspace.fs.writeFile(target, bytes);
+          // installFromVSIX only accepts file: URIs; globalStorageUri may use vscode-userdata:.
+          const dir = await mkdtemp(join(tmpdir(), 'sheets-update-'));
           try {
-            await vscode.commands.executeCommand('workbench.extensions.command.installFromVSIX', [target]);
+            const target = join(dir, basename(release.vsix.name));
+            await writeFile(target, bytes);
+            await vscode.commands.executeCommand('workbench.extensions.command.installFromVSIX', [vscode.Uri.file(target)]);
           } finally {
-            await vscode.workspace.fs.delete(target).then(undefined, () => undefined);
+            await rm(dir, { recursive: true, force: true }).catch(() => undefined);
           }
         });
       } catch (error) {
@@ -113,12 +117,8 @@ async function startUpdateCheck(context: vscode.ExtensionContext): Promise<void>
         const choice = await vscode.window.showErrorMessage(
           de ? `Sheets ${release.version} konnte nicht installiert werden: ${reason}` : `Could not install Sheets ${release.version}: ${reason}`, open);
         if (choice === open) void vscode.env.openExternal(vscode.Uri.parse(release.url, true));
-        return;
       }
-      const reload = de ? 'Fenster neu laden' : 'Reload Window';
-      const choice = await vscode.window.showInformationMessage(
-        de ? `Sheets ${release.version} ist installiert. Zum Aktivieren das Fenster neu laden.` : `Sheets ${release.version} is installed. Reload the window to activate it.`, reload);
-      if (choice === reload) await vscode.commands.executeCommand('workbench.action.reloadWindow');
+      // VS Code itself offers to restart extensions after installing the VSIX.
     },
     open: (url) => void vscode.env.openExternal(vscode.Uri.parse(url, true)),
     skip: (version) => void context.globalState.update(SKIPPED_VERSION_KEY, version),
