@@ -15,6 +15,13 @@
 - Formulas: `CEILING.MATH` and `FLOOR.MATH` accept the `mode` argument (was #VALUE!); `CEILING`/`FLOOR` return #NUM! for a positive number with a negative significance; rounding to multiples no longer leaks binary floating point (`FLOOR(0.3,0.1)` was 0.2, `CEILING(0.3,0.1)=0.3` was FALSE).
 - Formulas: a LAMBDA can be called directly, e.g. `=LAMBDA(x, x*2)(21)` or `add(1)(41)` (was #NAME?).
 - Formulas: `INDIRECT(text, FALSE)` reads R1C1 references (`R2C3`, `R[1]C[-1]`, ranges, rows, columns); the second argument was ignored.
+- Formulas: 86 new functions (289 in total), each tested against the examples of Microsoft's function reference:
+  - Date: `YEARFRAC`, `DAYS360`, `NETWORKDAYS.INTL`, `WORKDAY.INTL` (weekend codes and masks); holidays given as date text such as `{"2006/1/2"}` now count, and `2006/1/2` is read as a date.
+  - Statistics: `SLOPE`, `INTERCEPT`, `FORECAST`/`FORECAST.LINEAR`, `TREND` and `GROWTH` (also with several x variables), `RSQ`, `PEARSON`, `STEYX`, `COVAR`, `COVARIANCE.P`/`.S`, `FREQUENCY`, `RANK.AVG`, `PERCENTILE.EXC`, `QUARTILE.EXC`, `PERCENTRANK`(`.INC`/`.EXC`), `MODE.SNGL`, `MODE.MULT`, `GEOMEAN`, `HARMEAN`, `AVEDEV`, `DEVSQ`, `SKEW`, `KURT`, `MAXA`, `MINA`, `NORM.DIST`, `NORM.S.DIST`, `NORM.INV`, `NORM.S.INV` and their older names, `STANDARDIZE`, `RANDARRAY`.
+  - Financial: `XNPV`, `CUMIPMT`, `CUMPRINC`, `SLN`, `SYD`, `DB`, `DDB`, `EFFECT`, `NOMINAL`.
+  - Math and engineering: `COMBIN`, `PERMUT`, `SINH`, `COSH`, `TANH`, `ASINH`, `ACOSH`, `ATANH`, `BASE`, `DECIMAL`, `ROMAN` (all five forms), `ARABIC`, all twelve `BIN`/`OCT`/`DEC`/`HEX` conversions.
+  - Text and reference: `NUMBERVALUE`, `UNICHAR`, `UNICODE`, `LENB`, `VALUETOTEXT`, `ARRAYTOTEXT`, `ADDRESS`, `AREAS`, `SHEET`, `SHEETS`.
+  - Functions added to Excel since 2010 are saved with the `_xlfn.` prefix Excel needs. `CELL`, `INFO`, `DOLLAR` and `CONVERT` stay unsupported on purpose: their results depend on the Excel installation (regional settings, environment) or on unit rules Microsoft does not document completely, so files keep the results Excel stored.
 - Tests: Excel reference results for every function in the library, and a check that fails when a registered function has no test.
 - Recursive LAMBDA formulas that never end stop after 1000 nested calls with #CALC! within milliseconds instead of freezing the editor for about half a second.
 - CSV: a one-time, non-blocking notice when a save drops content CSV cannot hold (other sheets, charts, formulas, formatting, ...). "Save As" writes the format of the target file. Cell texts starting with `=`, `+`, `-` or `@` are written unchanged (see the CSV injection note in docs/xlsx-compatibility.md).
