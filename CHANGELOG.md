@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Fix: installing an update from the update notice failed with "No Servers".
+
 ## 1.0.0
 
 - Formulas: `LET`, `LAMBDA` (also via defined names), `MAP`, `BYROW`, `BYCOL`, `REDUCE`, `SCAN`, `MAKEARRAY`, `ISOMITTED`, `VSTACK`, `HSTACK`, `TAKE`, `DROP`, `CHOOSEROWS`, `CHOOSECOLS`, `TOCOL`, `TOROW`, `WRAPROWS`, `WRAPCOLS`, `EXPAND`, `SORTBY`, `TEXTSPLIT`, `TEXTBEFORE`, `TEXTAFTER`, `IRR`, `XIRR`, `RATE`, `AGGREGATE` and `HYPERLINK`.
