@@ -1757,7 +1757,7 @@ export class SpreadsheetView {
     } else {
       const cell = this.cellAt(x, y);
       if (this.editor.editing && this.editor.canInsertRef()) {
-        this.editor.insertRef(formatAddress(cell.row, cell.col));
+        this.editor.insertRef(cell);
         this.drag = { kind: 'ref', anchor: cell };
         this.afterEditorInput();
       } else if (this.onFillHandle(x, y)) {
@@ -1852,9 +1852,7 @@ export class SpreadsheetView {
         break;
       }
       case 'ref': {
-        const r = normalizeRange(drag.anchor, cell);
-        const single = r.start.row === r.end.row && r.start.col === r.end.col;
-        this.editor.insertRef(single ? formatAddress(r.start.row, r.start.col) : formatRange(r));
+        this.editor.insertRef(drag.anchor, cell);
         this.afterEditorInput();
         break;
       }
@@ -2032,11 +2030,11 @@ export class SpreadsheetView {
           if (ed.mode !== 'enter' || input !== ed.textarea) return;
           const [dr, dc] = arrowDelta(e.key);
           if (ed.canInsertRef()) {
-            // "Point" mode: arrow keys move a reference in the formula.
+            // "Point" mode: arrow keys move a reference in the formula, Shift extends it to a range.
             e.preventDefault();
-            const current = ed.currentRefRange()?.end ?? this.active;
-            const next = clampCell({ row: current.row + dr, col: current.col + dc });
-            ed.insertRef(formatAddress(next.row, next.col));
+            const current = ed.currentRef() ?? { anchor: this.active, active: this.active };
+            const next = clampCell({ row: current.active.row + dr, col: current.active.col + dc });
+            ed.insertRef(e.shiftKey ? current.anchor : next, next);
             this.afterEditorInput();
             return;
           }

@@ -1,4 +1,4 @@
-import { getFunction, listFunctions, parseRange, tokenize, type CellStyle, type RangeAddress } from '@sheets/core';
+import { formatAddress, formatRange, getFunction, listFunctions, normalizeRange, parseRange, tokenize, type CellAddress, type CellStyle } from '@sheets/core';
 import { cssFont, type GridTheme, type Highlight } from './grid.js';
 
 export const REF_COLORS = ['#1a73e8', '#e8710a', '#188038', '#a142f4', '#d01884', '#007b83', '#b06000', '#c5221f'];
@@ -34,8 +34,8 @@ export class CellEditor {
   mode: 'enter' | 'edit' = 'enter';
   cell = { row: 0, col: 0 };
   original = '';
-  /** Range of the last inserted reference in the active input (for replacing while dragging). */
-  private refSpan: { start: number; end: number } | null = null;
+  /** Last inserted reference in the active input (for replacing while dragging or pointing with arrows). */
+  private refSpan: { start: number; end: number; anchor: CellAddress; active: CellAddress } | null = null;
   private suggestions: string[] = [];
   private suggestIndex = 0;
   /** The input currently being typed into (cell editor or formula bar). */
@@ -133,7 +133,11 @@ export class CellEditor {
     return /[=(,;+\-*/^&<>:]$/.test(before);
   }
 
-  insertRef(ref: string): void {
+  /** Insert (or replace the last inserted) reference spanning `anchor` to `active`. */
+  insertRef(anchor: CellAddress, active: CellAddress = anchor): void {
+    const r = normalizeRange(anchor, active);
+    const single = r.start.row === r.end.row && r.start.col === r.end.col;
+    const ref = single ? formatAddress(r.start.row, r.start.col) : formatRange(r);
     const input = this.activeInput;
     const text = input.value;
     let start: number;
@@ -146,7 +150,7 @@ export class CellEditor {
     input.value = text.slice(0, start) + ref + text.slice(end);
     const caret = start + ref.length;
     input.setSelectionRange(caret, caret);
-    this.refSpan = { start, end: caret };
+    this.refSpan = { start, end: caret, anchor: { ...anchor }, active: { ...active } };
     this.syncFrom(input);
   }
 
@@ -260,9 +264,8 @@ export class CellEditor {
     this.hint.style.top = `${top}px`;
   }
 
-  /** Visible reference range of the current text, for ref-aware arrow navigation. */
-  currentRefRange(): RangeAddress | null {
-    if (!this.refSpan) return null;
-    return parseRange(this.activeInput.value.slice(this.refSpan.start, this.refSpan.end))?.range ?? null;
+  /** Anchor and moving corner of the last inserted reference, for arrow-key pointing. */
+  currentRef(): { anchor: CellAddress; active: CellAddress } | null {
+    return this.refSpan && { anchor: this.refSpan.anchor, active: this.refSpan.active };
   }
 }
