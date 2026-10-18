@@ -214,7 +214,7 @@ code --extensionDevelopmentPath=$PWD
 - Native Excel-Pivot-Caches und Bilder fehlen noch. Notizen und Hyperlinks werden gelesen und angezeigt, aber im Editor nicht bearbeitet.
 - Bedingte Formatierung unterstützt Zellvergleiche, Formelregeln, Min/Max-Farbskalen mit optionaler 50%-Mitte, Datenbalken und Symbolsätze. Excel-2010-Erweiterungen (z. B. negative Datenbalken) und andere Regeltypen werden noch nicht importiert oder dargestellt.
 - Dynamische Arrays rechnen die Mappe vollständig neu; `SEQUENCE` und Pivot-Auswertungen sind auf eine Million Zellen begrenzt. Der implizite Schnittmengenoperator `@` außerhalb von Tabellenverweisen fehlt noch; eine Tabelle wächst beim Tippen in die Nachbarspalte nicht automatisch mit.
-- Zeilen einfügen/löschen und Sortieren werden bei XLSX-Dateien mit nicht vollständig modellierten Inhalten weiterhin blockiert, da dafür alle abhängigen Teile im Original-XML verschoben werden müssten.
+- Zeilen einfügen/löschen sowie Blätter umbenennen, löschen und verschieben werden bei XLSX-Dateien mit nicht vollständig modellierten Inhalten weiterhin blockiert, da dafür alle abhängigen Teile im Original-XML verschoben werden müssten. Sortieren und neue Blätter am Ende sind unter den in [XLSX-Kompatibilität](xlsx-compatibility.md) beschriebenen Bedingungen möglich.
 - Beim Löschen von Zeilen/Spalten oder Blättern speichert Undo eine Kopie der ganzen Mappe. Für sehr große Dateien sollte das durch gezielte Umkehr-Operationen ersetzt werden.
 - Abhängigkeiten von Bereichen werden linear durchsucht; für sehr viele Bereichsformeln wäre ein Intervall-Index sinnvoll.
 - Das Datumssystem 1904 wird beim Import nicht umgerechnet.

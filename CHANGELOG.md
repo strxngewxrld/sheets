@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- XLSX: sorting can now be saved in files with Excel content Sheets does not model, when the result is exact (cells take the original format records along; notes, hyperlinks, native tables, validation, merged cells and formulas referring to other rows stay blocked).
+- XLSX: sheets added at the end are written as new parts of the original package; files without `styles.xml` get a minimal style table so formatting can be saved. Renaming, deleting and moving sheets stay blocked.
+- XLSX protection messages follow the UI language (German/English).
+- CSV: opening and saving keeps the file content: line endings, a missing final line break and a UTF-8 BOM are kept; leading zeros, dates, percentages, foreign decimal separators and long numbers stay text.
+- CSV: a one-time, non-blocking notice when a save drops content CSV cannot hold (other sheets, charts, formulas, formatting, ...). "Save As" writes the format of the target file. Cell texts starting with `=`, `+`, `-` or `@` are written unchanged (see the CSV injection note in docs/xlsx-compatibility.md).
+- Editor: a loading notice while large files are parsed; files that cannot be opened show the error in the editor and are never saved (no more "getFileData timed out").
+- Conditional formatting dialog lists rules as readable text ("C2:C6 · Cell value > 6"); dialogs never grow taller than the editor and keep their buttons visible; the number format box names custom formats (e.g. currency).
+- Pivot reports leave row/column combinations without records empty (like Excel) and widen narrow output columns.
+- Fix: crashes on worksheets or style parts with empty or whitespace-only elements; formula evaluation in data validation no longer throws on runaway recursion.
+- Much faster "current region" detection (sorting/charts from a single cell) for very large sheets.
+
 ## 1.0.2
 
 - Fix Windows agent file paths: recognize UNC shares and normalize relative backslash paths, including remote workspaces.
