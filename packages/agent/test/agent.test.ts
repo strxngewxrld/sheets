@@ -162,4 +162,14 @@ describe('data validation tools', () => {
     expect(agent.execute('set_data_validation', { range: 'A1:A3', type: 'none' }).result).toEqual({ rules: 0 });
     expect(agent.execute('set_data_validation', { range: 'A1', type: 'list' }).ok).toBe(false);
   });
+
+  it('evaluate_formula reports runaway recursion as an error value like a stored cell', () => {
+    const wb = new Workbook();
+    wb.apply({ type: 'setName', name: 'LOOP', ref: 'LAMBDA(n, LOOP(n+1))' });
+    const agent = new SpreadsheetAgent(wb);
+    expect(agent.execute('evaluate_formula', { formula: '=LOOP(1)' })).toEqual({ ok: true, result: { value: '#CALC!', display: '#CALC!' } });
+    agent.execute('write_range', { start: 'A1', values: [['=LOOP(1)']] });
+    expect(agent.execute('read_range', { range: 'A1' }).ok).toBe(true);
+    expect(String(wb.getValue(0, 0, 0))).toBe('#CALC!');
+  });
 });

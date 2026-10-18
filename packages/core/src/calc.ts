@@ -432,14 +432,23 @@ export class CalcEngine {
         return m;
       };
     }
-    return evaluate(ast, ctx);
+    try {
+      return evaluate(ast, ctx);
+    } catch (e) {
+      return e instanceof RangeError ? new CellError('#CALC!', 'Recursion too deep') : new CellError('#VALUE!', String(e));
+    }
   }
 
   /** Evaluates an ad-hoc formula in the context of a sheet (not stored). */
   evaluateFormula(formula: string, sheet: Sheet, row = 0, col = 0): Scalar {
     const ast = this.parse(formula.startsWith('=') ? formula.slice(1) : formula);
     if (ast instanceof CellError) return ast;
-    return evaluateCell(ast, this.contextFor(sheet, row, col));
+    try {
+      return evaluateCell(ast, this.contextFor(sheet, row, col));
+    } catch (e) {
+      // Same mapping as for stored cells, so a pathological formula yields an error value instead of throwing.
+      return e instanceof RangeError ? new CellError('#CALC!', 'Recursion too deep') : new CellError('#VALUE!', String(e));
+    }
   }
 
   /** Cells (as sheet/row/col) that directly depend on the given cell. */
