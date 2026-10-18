@@ -20,6 +20,8 @@ export async function checkPackage(path) {
   assert.equal(pkg.name, 'sheets-vscode');
   // The extension ID (publisher.name) is used by the VS Code host test.
   assert.equal(pkg.publisher, 'Tom-Knueppel');
+  // Installation instructions name the VSIX file; they must match the packaged version.
+  for (const [, version] of strFromU8(files['extension/readme.md']).matchAll(/sheets-vscode-(\d+\.\d+\.\d+)\.vsix/g)) assert.equal(version, pkg.version, 'README names another VSIX version');
   assert.equal(pkg.contributes.configurationDefaults['workbench.editorAssociations']['*.xlsx'], 'sheets.spreadsheet');
   assert.equal(pkg.contributes.customEditors.find((editor) => editor.viewType === 'sheets.spreadsheet').priority, 'default');
   const png = files[`extension/${pkg.icon}`];
