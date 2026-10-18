@@ -38,7 +38,7 @@
   },
   "displayName": "Sheets – Excel & CSV Editor",
   "description": "%extension.description%",
-  "version": "0.2.3",
+  "version": "1.0.0",
   "publisher": "sheets",
   "repository": {
     "type": "git",
