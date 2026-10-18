@@ -446,6 +446,9 @@ export function parseInput(text: string, loc: FormatLocale = defaultLocale): Par
     if (m[4] !== undefined) return { value: date + timeToSerial(+m[4], +m[5]!, +(m[6] ?? 0)), numFmt: 'yyyy-mm-dd hh:mm' };
     return { value: date, numFmt: 'yyyy-mm-dd' };
   }
+  // Year first with slashes is a date in every Excel locale.
+  m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(t);
+  if (m && +m[2]! >= 1 && +m[2]! <= 12 && +m[3]! >= 1 && +m[3]! <= 31) return { value: dateToSerial(+m[1]!, +m[2]!, +m[3]!), numFmt: 'yyyy/m/d' };
   m = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/.exec(t);
   if (m && +m[2]! <= 12 && +m[1]! <= 31) {
     const y = m[3]!.length === 2 ? 2000 + +m[3]! : +m[3]!;
