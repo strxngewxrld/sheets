@@ -149,7 +149,7 @@ export const CSS = `
 .sx-zoom .sx-btn { min-width: 22px; height: 22px; padding: 0 4px; font-size: 12px; }
 .sx-zoom .sx-zoom-level { min-width: 48px; color: var(--sx-muted); }
 .sx-menu {
-  position: fixed; z-index: 1000; min-width: 200px; background: var(--sx-menu-bg); color: var(--sx-menu-fg); border: 1px solid var(--sx-grid);
+  position: absolute; z-index: 1000; min-width: min(200px, calc(100% - 8px)); box-sizing: border-box; overflow: auto; overscroll-behavior: contain; background: var(--sx-menu-bg); color: var(--sx-menu-fg); border: 1px solid var(--sx-grid);
   border-radius: 6px; box-shadow: var(--sx-shadow); padding: 4px 0; font-size: 13px;
 }
 .sx-menu button {
@@ -161,12 +161,13 @@ export const CSS = `
   position: absolute; z-index: 50; right: 16px; top: 16px; width: 280px; background: var(--sx-menu-bg); color: var(--sx-menu-fg);
   border: 1px solid var(--sx-grid); border-radius: 8px; box-shadow: var(--sx-shadow); padding: 12px 12px 0; display: grid; gap: 8px; font-size: 13px;
   /* Never taller than the editor: the content scrolls and the buttons stay reachable at the bottom. */
-  box-sizing: border-box; max-height: calc(100% - 32px); overflow-y: auto; overscroll-behavior: contain;
+  box-sizing: border-box; max-width: calc(100% - 32px); max-height: calc(100% - 32px); overflow-y: auto; overscroll-behavior: contain;
   /* Focused fields scroll into view above the sticky button row instead of behind it. */
   scroll-padding-bottom: 56px;
 }
 .sx-dialog h3 { margin: 0 0 4px; font-size: 14px; }
-.sx-dialog label { display: grid; gap: 3px; font-size: 12px; color: var(--sx-muted); }
+.sx-dialog label { display: grid; min-width: 0; gap: 3px; font-size: 12px; color: var(--sx-muted); }
+.sx-dialog input, .sx-dialog select { min-width: 0; max-width: 100%; box-sizing: border-box; }
 .sx-dialog label.sx-check { display: flex; align-items: center; gap: 6px; }
 .sx-dialog input[type=text], .sx-dialog select {
   height: 26px; border: 1px solid var(--sx-input-border); border-radius: 4px; background: var(--sx-input-bg); color: var(--sx-input-fg); font: inherit; padding: 0 6px;

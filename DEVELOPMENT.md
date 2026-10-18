@@ -35,6 +35,8 @@ Die GitHub-Actions-Matrix führt Typecheck, Tests und VSIX-Paketierung unter Ubu
 
 `npm run test:host` baut die Extension und prüft die echte VS-Code-Language-Model-Tool-API in einem separaten lokalen Profil. Details und Voraussetzungen stehen in [Copilot](docs/copilot.md). Der Test sendet keinen Chat an ein Sprachmodell.
 
+`npm run test:ui` baut die Extension und prüft die gerenderte Custom-Editor-Webview in einem eigenen Extension Development Host über Chromium DevTools. Voraussetzung ist eine lokale VS-Code-Desktop-Installation; mit `VSCODE_EXECUTABLE` lässt sich deren Launcher vorgeben. Die Prüfung verwendet ausschließlich erzeugte XLSX-/CSV-Dateien und ein temporäres Profil. Sie testet unter anderem Eingabe, Formeln, Einfügen, Suchen/Ersetzen, Datenüberprüfung, Menütastatur und Listener-Lebensdauer, schmale Dialoge, Tabellenfilter, alle Diagrammtypen, Blattverwaltung, Zoom, Light/Dark Theme und Speichern/Wiederöffnen. Ergebnis, Testdateien und Screenshots bleiben im ausgegebenen temporären Verzeichnis erhalten. Die Verbindung bleibt lokal; zusätzliche Browserpakete werden nicht benötigt. Native macOS-Menüs und Systemdialoge sind weiterhin manuell zu prüfen.
+
 ## Icon
 
 `media/icon.svg` ist die editierbare Quelle. `npm run icon` rendert daraus das 256×256-PNG für das Extension-Manifest. Beide Dateien einchecken. Das Manifest verwendet PNG entsprechend den [VS-Code-Paketierungsanforderungen](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).

@@ -20,7 +20,8 @@
     "check:package": "node scripts/check-package.mjs",
     "icon": "node scripts/icon.mjs",
     "clean": "node scripts/clean.mjs",
-    "test:host": "npm run build && node scripts/test-host.mjs"
+    "test:host": "npm run build && node scripts/test-host.mjs",
+    "test:ui": "npm run build && node scripts/test-ui.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
@@ -38,7 +39,7 @@
   },
   "displayName": "Sheets – Excel & CSV Editor",
   "description": "%extension.description%",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "publisher": "Tom-Knueppel",
   "author": {
     "name": "Tom Knüppel",

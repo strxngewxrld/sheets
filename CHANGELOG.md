@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - XLSX: sorting can now be saved in files with Excel content Sheets does not model, when the result is exact (cells take the original format records along; notes, hyperlinks, native tables, validation, merged cells and formulas referring to other rows stay blocked).
 - XLSX: sheets added at the end are written as new parts of the original package; files without `styles.xml` get a minimal style table so formatting can be saved. Renaming, deleting and moving sheets stay blocked.
