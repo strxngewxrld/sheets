@@ -1,6 +1,7 @@
 import { strFromU8, strToU8 } from 'fflate';
 import { Workbook } from '../workbook.js';
-import { readCsv, writeCsv, type CsvReadOptions, type CsvWriteOptions } from './csv.js';
+import { LOCALE_DE, LOCALE_EN } from '../numfmt.js';
+import { csvDataSheet, decodeCsvBytes, detectCsvLayout, detectDelimiter, encodeCsvText, readCsv, writeCsv, type CsvEncoding, type CsvReadOptions, type CsvWriteOptions } from './csv.js';
 import { readXlsx, type XlsxReadOptions } from './xlsx-read.js';
 import { writeXlsx, type XlsxWriteOptions } from './xlsx-write.js';
 
@@ -32,9 +33,14 @@ export function openWorkbook(bytes: Uint8Array | ArrayBuffer, fileName: string, 
   const baseName = fileName.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '').slice(0, 31) || 'Sheet1';
   switch (format) {
     case 'csv':
-      return readCsv(strFromU8(u8), { sheetName: baseName, ...options.csv });
-    case 'tsv':
-      return readCsv(strFromU8(u8), { delimiter: '\t', sheetName: baseName, ...options.csv });
+    case 'tsv': {
+      const { text, encoding } = decodeCsvBytes(u8);
+      const delimiter = options.csv?.delimiter ?? (format === 'tsv' ? '\t' : detectDelimiter(text));
+      const wb = readCsv(text, { sheetName: baseName, ...options.csv, delimiter });
+      // Remembered so a save writes the file back the way it was (also through JSON and undo).
+      wb.csvSource = { ...detectCsvLayout(text), delimiter, encoding, sheet: wb.sheets[0]!.name };
+      return wb;
+    }
     case 'json':
       return Workbook.fromJSON(JSON.parse(strFromU8(u8)));
     default:
@@ -43,17 +49,22 @@ export function openWorkbook(bytes: Uint8Array | ArrayBuffer, fileName: string, 
 }
 
 export interface SaveOptions {
-  csv?: CsvWriteOptions;
+  /** `encoding` and `sheet` default to the opened CSV file's encoding and data sheet. */
+  csv?: CsvWriteOptions & { encoding?: CsvEncoding; sheet?: string | number };
   xlsx?: XlsxWriteOptions;
 }
 
-/** Serializes a workbook into the given format. CSV/TSV write the active sheet. */
+/**
+ * Serializes a workbook into the given format. CSV/TSV write one sheet: the data
+ * sheet of an opened CSV file, otherwise the active sheet. A workbook read from
+ * CSV/TSV is written with its original delimiter, line endings, final line
+ * break, byte order mark and encoding unless options override them.
+ */
 export function saveWorkbook(wb: Workbook, format: FileFormat, options: SaveOptions = {}): Uint8Array {
   switch (format) {
     case 'csv':
-      return strToU8(writeCsv(wb, wb.activeSheetIndex, options.csv));
     case 'tsv':
-      return strToU8(writeCsv(wb, wb.activeSheetIndex, { delimiter: '\t', ...options.csv }));
+      return saveCsv(wb, format, options.csv);
     case 'json':
       return strToU8(JSON.stringify(wb.toJSON(), null, 2));
     case 'xlsm':
@@ -61,6 +72,19 @@ export function saveWorkbook(wb: Workbook, format: FileFormat, options: SaveOpti
     default:
       return writeXlsx(wb, options.xlsx);
   }
+}
+
+function saveCsv(wb: Workbook, format: 'csv' | 'tsv', options: NonNullable<SaveOptions['csv']> = {}): Uint8Array {
+  const source = wb.csvSource;
+  const { encoding: requested, sheet: requestedSheet, ...write } = options;
+  const delimiter = write.delimiter ?? (format === 'tsv' ? '\t' : source && source.delimiter !== '\t' ? source.delimiter : ',');
+  const text = writeCsv(wb, requestedSheet ?? csvDataSheet(wb).name, {
+    ...(source ? { lineEnding: source.lineEnding, finalNewline: source.finalNewline, bom: source.bom, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN } : {}),
+    ...Object.fromEntries(Object.entries(write).filter(([, value]) => value !== undefined)),
+    delimiter,
+  });
+  // Text that Windows-1252 cannot hold is written as UTF-8 with a BOM rather than losing characters.
+  return encodeCsvText(text, requested ?? source?.encoding ?? 'utf-8') ?? strToU8(text.startsWith('\uFEFF') ? text : `\uFEFF${text}`);
 }
 
 export * from './csv.js';

@@ -38,6 +38,16 @@ exports.run = async () => {
     };
     assert.match(await invoke('sheets_read_range', { file, range: 'A1:C3' }), /0004711/);
     checks.push('lm.invokeTool reads unopened XLSX without losing leading zeroes');
+
+    // An agent edit of an unopened CSV must keep everything but the edited value:
+    // delimiter, decimal comma, CRLF, missing final line break and the Windows-1252 umlaut.
+    const csvFile = path.join(process.env.SHEETS_HOST_WORKDIR, 'export.csv');
+    const latin = (text) => Buffer.from(text, 'latin1');
+    fs.writeFileSync(csvFile, latin('Name;Wert\r\nMüller;1,5\r\nB;2'));
+    const csvEdit = await api.executeTool('write_range', { start: 'B3', values: [[3]] }, csvFile);
+    assert.equal(csvEdit.ok, true, JSON.stringify(csvEdit));
+    assert.deepEqual(fs.readFileSync(csvFile), latin('Name;Wert\r\nMüller;1,5\r\nB;3'), 'Headless CSV write changed the file format');
+    checks.push('headless agent writes keep the CSV format and Windows-1252 encoding');
     await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file));
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
     assert(tab?.input instanceof vscode.TabInputCustom, 'XLSX did not open in a custom editor');

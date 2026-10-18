@@ -226,10 +226,32 @@ describe('VS Code webview loading errors and CSV saves', () => {
     expect(fileData(3).error).toBeUndefined();
     const warnings = bridge.post.mock.calls.map(([m]) => m as WebviewToHost).filter((m) => m.type === 'warning');
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatchObject({ message: expect.stringMatching(/data\.csv wird als CSV gespeichert\. .*nur die Werte des aktiven Blatts „(Zweites|data)“/) });
+    expect(warnings[0]).toMatchObject({ message: expect.stringMatching(/data\.csv wird als CSV gespeichert\. .*nur die Werte des Blatts „data“/) });
     expect(warnings[0]).toMatchObject({ message: expect.stringContaining('weitere Blätter') });
     fileData(4);
     expect(bridge.post.mock.calls.filter(([m]) => m.type === 'warning')).toHaveLength(1);
+  });
+
+  it('saves the data sheet of a CSV even when another sheet is active', () => {
+    csv('Name;Wert\r\nA;1\r\n');
+    send({ type: 'request', id: 1, method: 'executeTool', params: { name: 'add_sheet', input: { name: 'Zweites' } } });
+    send({ type: 'request', id: 2, method: 'executeTool', params: { name: 'write_range', input: { sheet: 'Zweites', start: 'A1', values: [['nur Notizen']] } } });
+    expect(new TextDecoder().decode(decodeBytes(fileData(3).result as string))).toBe('Name;Wert\r\nA;1\r\n');
+  });
+
+  it('keeps a Windows-1252 CSV byte for byte and warns once when it has to switch to UTF-8', () => {
+    // "Name;Wert\r\nMüller;1,5\r\n" in Windows-1252 (ü = 0xFC).
+    const cp1252 = Uint8Array.from([...'Name;Wert\r\nM'].map((c) => c.charCodeAt(0)).concat([0xfc], [...'ller;1,5\r\n'].map((c) => c.charCodeAt(0))));
+    send({ type: 'init', bytes: encodeBytes(cp1252), fileName: 'alt.csv', language: 'de', readOnly: false });
+    expect([...decodeBytes(fileData(1).result as string)]).toEqual([...cp1252]);
+    send({ type: 'request', id: 2, method: 'executeTool', params: { name: 'write_range', input: { start: 'A3', values: [['東京']] } } });
+    const utf8 = decodeBytes(fileData(3).result as string);
+    expect([...utf8.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder().decode(utf8)).toContain('Müller;1,5\r\n東京');
+    fileData(4);
+    const warnings = bridge.post.mock.calls.map(([m]) => m as WebviewToHost).filter((m) => m.type === 'warning');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ message: expect.stringMatching(/alt\.csv wurde als UTF-8 gespeichert, .*"東", "京"/) });
   });
 
   it('writes the format of the save target for "Save As"', () => {

@@ -4,6 +4,7 @@ import type { PivotTableSpec } from './pivot.js';
 import type { SheetTable } from './table.js';
 import type { CellData, SheetData } from './sheet.js';
 import type { DataValidation } from './validation.js';
+import type { CsvSource } from './io/csv.js';
 
 /** A single cell write. `data: null` deletes the cell (value, formula and style). */
 export interface CellPatch {
@@ -68,4 +69,6 @@ export interface WorkbookData {
     /** Applied sorts per sheet name; such sheets are patched with additional safeguards. */
     sortedSheets?: Record<string, number>;
   };
+  /** Format of the CSV/TSV file this workbook was read from, reproduced on save. */
+  csvSource?: CsvSource;
 }

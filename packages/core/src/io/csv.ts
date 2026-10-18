@@ -2,7 +2,7 @@ import { inputToCellData } from '../commands.js';
 import { formatAddress } from '../address.js';
 import type { Scalar } from '../values.js';
 import { formatValue, getDefaultLocale, LOCALE_DE, LOCALE_EN, type FormatLocale } from '../numfmt.js';
-import type { CellData, SheetData } from '../sheet.js';
+import type { CellData, Sheet, SheetData } from '../sheet.js';
 import { Workbook } from '../workbook.js';
 
 export interface CsvReadOptions {
@@ -36,6 +36,59 @@ export interface CsvLayout {
   lineEnding: '\n' | '\r\n';
   finalNewline: boolean;
   bom: boolean;
+}
+
+/** Text encodings of CSV files that are read and written back unchanged. */
+export type CsvEncoding = 'utf-8' | 'windows-1252';
+
+/** How an opened CSV/TSV file was written; a save reproduces it. */
+export interface CsvSource extends CsvLayout {
+  delimiter: string;
+  encoding: CsvEncoding;
+  /** The sheet holding the file's data; saved even when another sheet is active. */
+  sheet: string;
+}
+
+/**
+ * Decodes CSV bytes. Valid UTF-8 (with or without BOM) is read as UTF-8; anything
+ * else as Windows-1252, the encoding of CSV exports from Excel on German or
+ * Western European Windows. Reading such a file as UTF-8 would replace every
+ * umlaut with U+FFFD and destroy it on save.
+ */
+export function decodeCsvBytes(bytes: Uint8Array): { text: string; encoding: CsvEncoding } {
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes), encoding: 'utf-8' };
+  } catch {
+    return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows-1252' };
+  }
+}
+
+// Windows-1252 bytes 0x80-0x9F that differ from Latin-1 (undefined bytes decode to their C1 control).
+const CP1252_HIGH = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+
+/**
+ * Encodes text for a CSV file. Returns null when Windows-1252 cannot represent
+ * a character, so the caller can fall back to UTF-8 instead of losing it.
+ */
+export function encodeCsvText(text: string, encoding: CsvEncoding): Uint8Array | null {
+  if (encoding === 'utf-8') return new TextEncoder().encode(text);
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const high = CP1252_HIGH.indexOf(text[i]!);
+    if (high >= 0) out[i] = 0x80 + high;
+    else if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) out[i] = code;
+    else return null;
+  }
+  return out;
+}
+
+/** Characters of the text that Windows-1252 cannot represent (unique, in order of appearance). */
+export function unencodableCsvChars(text: string, encoding: CsvEncoding): string[] {
+  if (encoding === 'utf-8') return [];
+  const found = new Set<string>();
+  for (const char of text) if (encodeCsvText(char, encoding) === null) found.add(char);
+  return [...found];
 }
 
 /** Detects line endings, a final line break and a byte order mark (defaults for empty text). */
@@ -164,9 +217,14 @@ function isLossless(raw: string, data: CellData, locale: FormatLocale): boolean 
   return scalarText(v, locale) === raw;
 }
 
+/** The sheet a CSV/TSV save writes: the opened file's data sheet, else the active sheet. */
+export function csvDataSheet(wb: Workbook): Sheet {
+  return (wb.csvSource && wb.getSheet(wb.csvSource.sheet)) || wb.activeSheet;
+}
+
 /**
  * Amount of workbook content per kind that a CSV/TSV file cannot hold (only the
- * values of the active sheet are written). Callers compare it with the state at
+ * values of the data sheet are written, see csvDataSheet). Callers compare it with the state at
  * load time to warn before content is dropped.
  */
 export function csvUnsupportedContent(wb: Workbook): Record<string, number> {

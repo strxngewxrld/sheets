@@ -6,6 +6,10 @@
 - XLSX: sheets added at the end are written as new parts of the original package; files without `styles.xml` get a minimal style table so formatting can be saved. Renaming, deleting and moving sheets stay blocked.
 - XLSX protection messages follow the UI language (German/English).
 - CSV: opening and saving keeps the file content: line endings, a missing final line break and a UTF-8 BOM are kept; leading zeros, dates, percentages, foreign decimal separators and long numbers stay text.
+- CSV: Windows-1252 files (CSV exports of Excel on German/Western European Windows) are read and saved in their encoding instead of turning umlauts into replacement characters; text Windows-1252 cannot hold is saved as UTF-8 with BOM, with a one-time notice.
+- CSV: agent tools for unopened files and the MCP server keep the delimiter, decimal comma, line endings, BOM and encoding of a CSV file. Before, any agent edit rewrote a semicolon CSV with commas and decimal points.
+- CSV: a save always writes the file's data sheet, even when another sheet is active.
+- Recursive LAMBDA formulas that never end stop after 1000 nested calls with #CALC! within milliseconds instead of freezing the editor for about half a second.
 - CSV: a one-time, non-blocking notice when a save drops content CSV cannot hold (other sheets, charts, formulas, formatting, ...). "Save As" writes the format of the target file. Cell texts starting with `=`, `+`, `-` or `@` are written unchanged (see the CSV injection note in docs/xlsx-compatibility.md).
 - Editor: a loading notice while large files are parsed; files that cannot be opened show the error in the editor and are never saved (no more "getFileData timed out").
 - Conditional formatting dialog lists rules as readable text ("C2:C6 · Cell value > 6"); dialogs never grow taller than the editor and keep their buttons visible; the number format box names custom formats (e.g. currency).

@@ -62,6 +62,7 @@ export class Workbook {
   historyLimit = 500;
   pivotTables: PivotTableSpec[] = [];
   xlsxSource?: WorkbookData['xlsxSource'];
+  csvSource?: WorkbookData['csvSource'];
 
   private undoStack: HistoryEntry[] = [];
   private redoStack: HistoryEntry[] = [];
@@ -87,12 +88,14 @@ export class Workbook {
     if (this.pivotTables.length) data.pivotTables = structuredClone(this.pivotTables);
     // The archive and import baseline are never mutated; share them instead of deep copies.
     if (this.xlsxSource) data.xlsxSource = { ...this.xlsxSource };
+    if (this.csvSource) data.csvSource = { ...this.csvSource };
     return data;
   }
 
   /** Replaces the whole content without history (used by importers). */
   load(data: WorkbookData, options: { recalculate?: boolean } = {}): void {
     this.xlsxSource = data.xlsxSource ? { ...data.xlsxSource } : undefined;
+    this.csvSource = data.csvSource ? { ...data.csvSource } : undefined;
     this.pivotTables = structuredClone(data.pivotTables ?? []);
     this.sheets = data.sheets.map((s) => Sheet.fromJSON(s));
     if (!this.sheets.length) this.sheets.push(new Sheet('Sheet1'));
@@ -170,6 +173,8 @@ export class Workbook {
       for (const op of list) {
         const inverse = this.applyOp(op, tx);
         if (this.xlsxSource) this.trackXlsxEdit(op, options.origin === 'undo');
+        // The CSV data sheet follows renames (undo applies the inverse rename).
+        if (this.csvSource && op.type === 'renameSheet' && op.from === this.csvSource.sheet) this.csvSource = { ...this.csvSource, sheet: op.to };
         tx.ops.push(op);
         tx.inverse.unshift(...inverse);
       }

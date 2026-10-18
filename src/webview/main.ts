@@ -1,4 +1,5 @@
 import {
+  csvDataSheet,
   csvUnsupportedContent,
   detectCsvLayout,
   detectDelimiter,
@@ -10,6 +11,7 @@ import {
   saveWorkbook,
   setDefaultLocale,
   setXlsxMessageLanguage,
+  unencodableCsvChars,
   Workbook,
   writeCsv,
   XlsxProtectionError,
@@ -36,6 +38,7 @@ let csvLayout: CsvLayout | undefined;
 /** Content a CSV cannot hold that already existed when the file was opened. */
 let csvBaseline: Record<string, number> | undefined;
 let csvLossWarned = false;
+let csvEncodingWarned = false;
 
 function post(msg: WebviewToHost): void {
   vscode.postMessage(msg);
@@ -126,6 +129,7 @@ function init(msg: InitMessage): void {
       : openWorkbook(bytes, fileName, { csv: { delimiter: csvDelimiter, locale: csvDelimiter === ';' ? LOCALE_DE : LOCALE_EN } });
     csvBaseline = isCsv ? (snapshot?.csvBaseline ?? csvUnsupportedContent(wb)) : undefined;
     csvLossWarned = !!snapshot?.csvLossWarned;
+    csvEncodingWarned = !!snapshot?.csvEncodingWarned;
     if (!view) {
       app.replaceChildren();
       view = new SpreadsheetView(app, wb, { locale, language: msg.language, keyboardUndo: false, readOnly: msg.readOnly, onOpenLink: (url) => post({ type: 'openLink', url }) });
@@ -168,7 +172,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebview>) => {
       try {
         if (!view || !agent) throw new Error('Workbook not loaded');
         if (msg.method === 'getBackupData') {
-          const bytes = new TextEncoder().encode(JSON.stringify({ type: 'sheets-backup-v1', csvDelimiter, csvLayout, csvBaseline, csvLossWarned, workbook: view.workbook.toJSON() }));
+          const bytes = new TextEncoder().encode(JSON.stringify({ type: 'sheets-backup-v1', csvDelimiter, csvLayout, csvBaseline, csvLossWarned, csvEncodingWarned, workbook: view.workbook.toJSON() }));
           post({ type: 'response', id: msg.id, result: encodeBytes(bytes) });
         } else if (msg.method === 'getFileData') {
           const target = msg.params?.fileName ?? fileName;
@@ -178,15 +182,24 @@ window.addEventListener('message', (event: MessageEvent<HostToWebview>) => {
           // Another target format gets its own delimiter (TSV: tab, CSV: by UI language).
           const delimiter = sameFormat ? csvDelimiter : format === 'tsv' ? '\t' : language.toLowerCase().startsWith('de') ? ';' : ',';
           const bytes = saveWorkbook(wb, format, {
-            csv: { delimiter, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN, ...(sameFormat && csvLayout ? csvLayout : { lineEnding: '\n' }) },
+            // Another format is a conversion and written as UTF-8; the same format keeps the file's encoding.
+            csv: { delimiter, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN, ...(sameFormat && csvLayout ? csvLayout : { lineEnding: '\n', encoding: 'utf-8' }) },
           });
+          const encoding = wb.csvSource?.encoding;
+          if (sameFormat && encoding === 'windows-1252' && !csvEncodingWarned && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+            // saveWorkbook fell back to UTF-8 because the text holds characters Windows-1252 cannot represent.
+            csvEncodingWarned = true;
+            const chars = unencodableCsvChars(writeCsv(wb, csvDataSheet(wb).name, { delimiter }), encoding);
+            const shown = chars.slice(0, 5).map((c) => `"${c}"`).join(', ') + (chars.length > 5 ? ', …' : '');
+            post({ type: 'warning', message: fill(shellStrings(language).csvUtf8Fallback, target.split(/[\\/]/).pop() ?? target, shown) });
+          }
           if ((format === 'csv' || format === 'tsv') && !csvLossWarned) {
             const lost = sameFormat ? csvLosses(wb) : Object.entries(csvUnsupportedContent(wb)).filter(([, n]) => n > 0).map(([key]) => key);
             if (lost.length) {
               // Once per document: saving as CSV is allowed, but the user learns what is not kept.
               csvLossWarned = true;
               const strings = shellStrings(language);
-              post({ type: 'warning', message: fill(strings.csvLoss, target.split(/[\\/]/).pop() ?? target, format.toUpperCase(), wb.activeSheet.name, lost.map((key) => strings.csvLossParts[key] ?? key).join(', ')) });
+              post({ type: 'warning', message: fill(strings.csvLoss, target.split(/[\\/]/).pop() ?? target, format.toUpperCase(), csvDataSheet(wb).name, lost.map((key) => strings.csvLossParts[key] ?? key).join(', ')) });
             }
           }
           post({ type: 'response', id: msg.id, result: encodeBytes(bytes) });
