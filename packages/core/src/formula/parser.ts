@@ -1,6 +1,6 @@
 import { MAX_COLS, MAX_ROWS, nameToCol, splitSheetPrefix } from '../address.js';
 import { errorFromCode } from '../values.js';
-import { FormulaParseError, type BinaryOp, type Node, type RefPoint, type StructuredArea, type StructuredRef } from './ast.js';
+import { FormulaParseError, INVOKE, type BinaryOp, type Node, type RefPoint, type StructuredArea, type StructuredRef } from './ast.js';
 import { tokenize, type Token } from './tokenizer.js';
 
 const BINARY_PRECEDENCE: Record<string, number> = {
@@ -153,6 +153,11 @@ class Parser {
 
   private expression(minPrec: number): Node {
     let left = this.prefix();
+    // A call on a result, e.g. LAMBDA(x, x*2)(21) or add(1)(41): the callee becomes the first argument.
+    while (this.peek()?.type === 'lparen') {
+      this.pos++;
+      left = { type: 'func', name: INVOKE, args: [left, ...this.argumentList()] };
+    }
     for (;;) {
       const t = this.peek();
       if (!t || t.type !== 'op') break;
@@ -218,11 +223,17 @@ class Parser {
 
   private call(nameTok: Token): Node {
     this.expect('lparen');
-    const args: Node[] = [];
     const name = normalizeFunctionName(nameTok.text);
+    const args = this.argumentList();
+    return name === 'ANCHORARRAY' && args.length === 1 ? { type: 'spill', arg: args[0]! } : { type: 'func', name, args };
+  }
+
+  /** Arguments after an opening parenthesis, up to and including the closing one. */
+  private argumentList(): Node[] {
+    const args: Node[] = [];
     if (this.peek()?.type === 'rparen') {
       this.pos++;
-      return { type: 'func', name, args };
+      return args;
     }
     for (;;) {
       const t = this.peek();
@@ -232,7 +243,7 @@ class Parser {
       if (sep.type === 'rparen') break;
       if (sep.type !== 'comma') throw new FormulaParseError(`Expected "," or ")" but found "${sep.text}"`, sep.start);
     }
-    return name === 'ANCHORARRAY' && args.length === 1 ? { type: 'spill', arg: args[0]! } : { type: 'func', name, args };
+    return args;
   }
 
   private arrayLiteral(): Node {

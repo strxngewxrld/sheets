@@ -1,4 +1,4 @@
-import type { Node } from './ast.js';
+import { INVOKE, type Node } from './ast.js';
 import { walk } from './parser.js';
 import { getFunction } from './registry.js';
 
@@ -21,7 +21,7 @@ export function hasUnknownFunctions(node: Node, isDefinedName: (name: string) =>
   const bound = boundNames(node);
   let unknown = false;
   walk(node, (n) => {
-    if (n.type === 'func' && !getFunction(n.name) && !bound.has(n.name.toUpperCase()) && !isDefinedName(n.name)) unknown = true;
+    if (n.type === 'func' && n.name !== INVOKE && !getFunction(n.name) && !bound.has(n.name.toUpperCase()) && !isDefinedName(n.name)) unknown = true;
   });
   return unknown;
 }

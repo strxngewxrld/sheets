@@ -1,7 +1,7 @@
 import { normalizeRange, singleCellRange, type RangeAddress } from '../address.js';
 import { formatGeneral } from '../numfmt.js';
 import { CellError, Err, isError, type Scalar } from '../values.js';
-import type { Node, StructuredRef } from './ast.js';
+import { INVOKE, type Node, type StructuredRef } from './ast.js';
 import { getFunction } from './registry.js';
 
 export type Matrix = Scalar[][];
@@ -337,6 +337,12 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
       return broadcast([deref(left, ctx), deref(right, ctx)], (a, b) => binaryScalar(node.op, a, b));
     }
     case 'func': {
+      if (node.name === INVOKE) {
+        // The callee is the first argument; anything but a LAMBDA cannot be called.
+        const fn = evaluate(node.args[0]!, ctx);
+        if (!isLambda(fn)) return isError(fn) ? fn : Err.VALUE;
+        return callLambda(fn, node.args.slice(1).map((a) => (a.type === 'missing' ? null : evaluate(a, ctx))), ctx);
+      }
       const def = getFunction(node.name);
       if (!def) {
         const fn = ctx.locals?.get(node.name.toUpperCase()) ?? (() => {

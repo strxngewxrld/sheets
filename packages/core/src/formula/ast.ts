@@ -36,6 +36,9 @@ export type Node =
   | { type: 'array'; rows: Node[][] }
   | { type: 'missing' };
 
+/** Name of the func node for a call on a computed value; it cannot be typed as a function name. */
+export const INVOKE = '()';
+
 export type BinaryOp = '+' | '-' | '*' | '/' | '^' | '&' | '=' | '<>' | '<' | '>' | '<=' | '>=' | ':';
 
 export class FormulaParseError extends Error {
