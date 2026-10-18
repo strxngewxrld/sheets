@@ -1,4 +1,4 @@
-import { normalizeRange } from '../../address.js';
+import { colToName, formatAddress, normalizeRange } from '../../address.js';
 import { Err, isError, type Scalar } from '../../values.js';
 import { compareScalars, isRef, toMatrix, toScalar, type EvalValue, type FunctionContext, type Matrix } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
@@ -151,8 +151,10 @@ export const lookupFunctions: FunctionDef[] = [
     if (sr < 0 || sc < 0 || height < 1 || width < 1) return Err.REF;
     return { kind: 'ref', sheet: ref.sheet, range: { start: { row: sr, col: sc }, end: { row: sr + height - 1, col: sc + width - 1 } } };
   }, { minArgs: 3, maxArgs: 5, volatile: true }),
-  def('INDIRECT', 'lookup', 'INDIRECT(ref_text)', 'Reference from a text string.', ([t], ctx) => {
-    const node = ctx.parseRef?.(textArg(t, ctx));
+  def('INDIRECT', 'lookup', 'INDIRECT(ref_text, [a1])', 'Reference from a text string (A1 or, with a1 = FALSE, R1C1 style).', ([t, a1], ctx) => {
+    const text = textArg(t, ctx);
+    const ref = a1 === undefined || boolArg(a1, ctx, true) ? text : r1c1ToA1(text, ctx.row, ctx.col);
+    const node = ref === null ? undefined : ctx.parseRef?.(ref);
     if (!node || (node.type !== 'cell' && node.type !== 'range')) return Err.REF;
     return ctx.evaluate(node);
   }, { minArgs: 1, maxArgs: 2, volatile: true }),
@@ -169,6 +171,41 @@ export const lookupFunctions: FunctionDef[] = [
     return (res ? vector(res, ctx) : values)[idx] ?? Err.NA;
   }, { minArgs: 2, maxArgs: 3 }),
 ];
+
+/**
+ * Converts an R1C1 reference (R2C3, R[1]C[-1], R2C3:R4C5, R2, C3, with an optional
+ * sheet prefix) to A1 style. Relative parts count from the formula's cell (0-based
+ * row and col). Returns null for text that is not an R1C1 reference.
+ */
+export function r1c1ToA1(text: string, row: number, col: number): string | null {
+  const bang = text.lastIndexOf('!');
+  const sheet = bang >= 0 ? text.slice(0, bang + 1) : '';
+  // R2 is absolute (1-based), R[-1] relative to the formula's cell, a bare R the same row.
+  const index = (spec: string | undefined, current: number): number | null => {
+    const value = !spec ? current : spec.startsWith('[') ? current + Number(spec.slice(1, -1)) : Number(spec) - 1;
+    return Number.isInteger(value) && value >= 0 ? value : null;
+  };
+  const N = '(\\[-?\\d+\\]|\\d+)?';
+  const cell = new RegExp(`^R${N}C${N}$`, 'i'), rowOnly = new RegExp(`^R${N}$`, 'i'), colOnly = new RegExp(`^C${N}$`, 'i');
+  const parts = text.slice(bang + 1).split(':').map((p) => p.trim());
+  if (parts.length > 2) return null;
+  const parsed = parts.map((p) => {
+    let m = cell.exec(p);
+    if (m) return { r: index(m[1], row), c: index(m[2], col) };
+    if ((m = rowOnly.exec(p))) return { r: index(m[1], row), c: undefined };
+    if ((m = colOnly.exec(p))) return { r: undefined, c: index(m[1], col) };
+    return null;
+  });
+  if (parsed.some((p) => p === null || p.r === null || p.c === null)) return null;
+  const [a, b = a] = parsed as { r?: number; c?: number }[];
+  if (a!.r !== undefined && a!.c !== undefined && b!.r !== undefined && b!.c !== undefined) {
+    const first = formatAddress(a!.r, a!.c);
+    return sheet + (parts.length === 1 ? first : `${first}:${formatAddress(b!.r, b!.c)}`);
+  }
+  if (a!.c === undefined && b!.c === undefined) return `${sheet}${a!.r! + 1}:${b!.r! + 1}`;
+  if (a!.r === undefined && b!.r === undefined) return `${sheet}${colToName(a!.c!)}:${colToName(b!.c!)}`;
+  return null;
+}
 
 function xIndex(needle: Scalar, values: Scalar[], mode: number, search: number): number {
   const order = search < 0 ? [...values.keys()].reverse() : [...values.keys()];
