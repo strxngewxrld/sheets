@@ -5,7 +5,7 @@ import { SpreadsheetEditorProvider } from './provider.js';
 import { registerCopilotTools } from './copilot.js';
 import { decodeBytes } from './binary.js';
 import type { CsvExport } from './protocol.js';
-import { checkForUpdates } from './update-check.js';
+import { checkForUpdates, downloadVsix } from './update-check.js';
 
 export interface SheetsApi {
   /** Tool definitions (name, description, JSON schema). */
@@ -82,13 +82,43 @@ async function startUpdateCheck(context: vscode.ExtensionContext): Promise<void>
     fetch,
     skipped: context.globalState.get<string>(SKIPPED_VERSION_KEY),
     async notify(release) {
+      const install = de ? 'Installieren' : 'Install';
       const open = de ? 'Release öffnen' : 'Open Release';
       const skip = de ? 'Diese Version überspringen' : 'Skip This Version';
       const message = de
         ? `Sheets ${release.version} ist verfügbar (installiert: ${manifest.version}).`
         : `Sheets ${release.version} is available (installed: ${manifest.version}).`;
-      const choice = await vscode.window.showInformationMessage(message, open, skip);
-      return choice === open ? 'open' : choice === skip ? 'skip' : undefined;
+      const choice = await vscode.window.showInformationMessage(message, ...(release.vsix ? [install] : []), open, skip);
+      return choice === install ? 'install' : choice === open ? 'open' : choice === skip ? 'skip' : undefined;
+    },
+    async install(release) {
+      try {
+        await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: de ? `Sheets ${release.version} wird installiert…` : `Installing Sheets ${release.version}…`,
+        }, async () => {
+          const bytes = await downloadVsix(release.vsix, fetch);
+          const target = vscode.Uri.joinPath(context.globalStorageUri, release.vsix.name);
+          await vscode.workspace.fs.createDirectory(context.globalStorageUri);
+          await vscode.workspace.fs.writeFile(target, bytes);
+          try {
+            await vscode.commands.executeCommand('workbench.extensions.command.installFromVSIX', [target]);
+          } finally {
+            await vscode.workspace.fs.delete(target).then(undefined, () => undefined);
+          }
+        });
+      } catch (error) {
+        const open = de ? 'Release öffnen' : 'Open Release';
+        const reason = error instanceof Error ? error.message : String(error);
+        const choice = await vscode.window.showErrorMessage(
+          de ? `Sheets ${release.version} konnte nicht installiert werden: ${reason}` : `Could not install Sheets ${release.version}: ${reason}`, open);
+        if (choice === open) void vscode.env.openExternal(vscode.Uri.parse(release.url, true));
+        return;
+      }
+      const reload = de ? 'Fenster neu laden' : 'Reload Window';
+      const choice = await vscode.window.showInformationMessage(
+        de ? `Sheets ${release.version} ist installiert. Zum Aktivieren das Fenster neu laden.` : `Sheets ${release.version} is installed. Reload the window to activate it.`, reload);
+      if (choice === reload) await vscode.commands.executeCommand('workbench.action.reloadWindow');
     },
     open: (url) => void vscode.env.openExternal(vscode.Uri.parse(url, true)),
     skip: (version) => void context.globalState.update(SKIPPED_VERSION_KEY, version),

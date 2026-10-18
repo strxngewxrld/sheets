@@ -1,8 +1,18 @@
 /** Checks GitHub Releases for a newer version of the extension. Kept free of the VS Code API for tests. */
+import { createHash } from 'node:crypto';
+
+export interface ReleaseAsset {
+  name: string;
+  url: string;
+  /** Hex SHA-256 reported by GitHub, if available. */
+  sha256?: string;
+}
 
 export interface LatestRelease {
   version: string;
   url: string;
+  /** The VSIX attached to the release, if there is exactly one. */
+  vsix?: ReleaseAsset;
 }
 
 export interface UpdateCheckDeps {
@@ -14,7 +24,8 @@ export interface UpdateCheckDeps {
   /** Version the user chose to skip, if any. */
   skipped?: string;
   /** Shows the notification and resolves with the chosen action. */
-  notify(release: LatestRelease): Promise<'open' | 'skip' | undefined>;
+  notify(release: LatestRelease): Promise<'install' | 'open' | 'skip' | undefined>;
+  install(release: LatestRelease & { vsix: ReleaseAsset }): Promise<void>;
   open(url: string): void;
   skip(version: string): void;
 }
@@ -45,11 +56,36 @@ export async function latestRelease(repository: string, fetchImpl: typeof fetch)
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) return undefined;
-  const data = await response.json() as { tag_name?: unknown; html_url?: unknown };
+  const data = await response.json() as { tag_name?: unknown; html_url?: unknown; assets?: unknown };
   if (typeof data.tag_name !== 'string' || typeof data.html_url !== 'string') return undefined;
   // Only ever open the release page of this repository.
-  if (!data.html_url.toLowerCase().startsWith(`https://github.com/${repository.toLowerCase()}/releases/`)) return undefined;
-  return { version: data.tag_name.replace(/^v/, ''), url: data.html_url };
+  const base = `https://github.com/${repository.toLowerCase()}/releases/`;
+  if (!data.html_url.toLowerCase().startsWith(base)) return undefined;
+  const vsix = releaseVsix(data.assets, `${base}download/`);
+  return { version: data.tag_name.replace(/^v/, ''), url: data.html_url, ...(vsix && { vsix }) };
+}
+
+/** The single .vsix asset downloaded from this repository's releases, if any. */
+function releaseVsix(assets: unknown, downloadBase: string): ReleaseAsset | undefined {
+  if (!Array.isArray(assets)) return undefined;
+  const found = assets.filter((a): a is { name: string; browser_download_url: string; digest?: unknown } =>
+    typeof a?.name === 'string' && /\.vsix$/i.test(a.name) &&
+    typeof a.browser_download_url === 'string' && a.browser_download_url.toLowerCase().startsWith(downloadBase));
+  if (found.length !== 1) return undefined;
+  const { name, browser_download_url: url, digest } = found[0]!;
+  const sha256 = typeof digest === 'string' ? /^sha256:([0-9a-f]{64})$/i.exec(digest)?.[1]?.toLowerCase() : undefined;
+  return { name, url, ...(sha256 && { sha256 }) };
+}
+
+/** Downloads a release VSIX and verifies the checksum GitHub reports for it. */
+export async function downloadVsix(asset: ReleaseAsset, fetchImpl: typeof fetch): Promise<Uint8Array> {
+  const response = await fetchImpl(asset.url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (asset.sha256 && createHash('sha256').update(bytes).digest('hex') !== asset.sha256) {
+    throw new Error('SHA-256 mismatch');
+  }
+  return bytes;
 }
 
 /** Notifies about a newer release; network and API errors are ignored. Returns the release that was offered. */
@@ -59,7 +95,8 @@ export async function checkForUpdates(deps: UpdateCheckDeps): Promise<LatestRele
   const release = await latestRelease(repository, deps.fetch).catch(() => undefined);
   if (!release || !isNewerVersion(release.version, deps.current) || release.version === deps.skipped) return undefined;
   const choice = await deps.notify(release);
-  if (choice === 'open') deps.open(release.url);
+  if (choice === 'install' && release.vsix) await deps.install({ ...release, vsix: release.vsix });
+  else if (choice === 'open') deps.open(release.url);
   else if (choice === 'skip') deps.skip(release.version);
   return release;
 }
