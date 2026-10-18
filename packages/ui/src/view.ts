@@ -1,3 +1,4 @@
+import { numberFormatCategory } from './format-names.js';
 import {
   applyBorders,
   applyStyle,
@@ -612,9 +613,14 @@ export class SpreadsheetView {
       ['@', s.text],
     ];
     for (const [code, label] of formats) fmt.add(new Option(label, code));
+    // Names a custom format of the selection (e.g. a currency code); shown only while it applies.
+    const current = new Option('', '__current');
+    current.hidden = true;
+    fmt.add(current);
     fmt.add(new Option('…', '__custom', false, false));
     fmt.addEventListener('change', () => {
       if (fmt.value === '__custom') { this.openCellFormats(); return; }
+      if (fmt.value === '__current') return;
       this.styleSelection({ numFmt: fmt.value || null });
       this.focus();
     });
@@ -893,8 +899,16 @@ export class SpreadsheetView {
     const fmt = this.controls.numFmt as HTMLSelectElement | undefined;
     if (fmt) {
       const code = style?.numFmt ?? '';
-      const known = [...fmt.options].some((o) => o.value === code);
-      fmt.value = known ? code : '__custom';
+      const known = code !== '__current' && code !== '__custom' && [...fmt.options].some((o) => o.value === code);
+      const current = [...fmt.options].find((o) => o.value === '__current');
+      if (current) {
+        const category = numberFormatCategory(code);
+        const name = category ? this.strings[category] : '';
+        current.text = name ? `${name} (${code.length > 24 ? `${code.slice(0, 23)}…` : code})` : code.length > 32 ? `${code.slice(0, 31)}…` : code;
+        current.title = code;
+        current.hidden = known;
+      }
+      fmt.value = known ? code : current ? '__current' : '__custom';
     }
     const size = this.controls.fontSize as HTMLSelectElement | undefined;
     if (size) size.value = String(style?.fontSize ?? 11);
