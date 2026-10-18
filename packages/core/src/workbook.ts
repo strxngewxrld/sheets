@@ -169,9 +169,7 @@ export class Workbook {
     try {
       for (const op of list) {
         const inverse = this.applyOp(op, tx);
-        if (this.xlsxSource && (['insertRows', 'deleteRows', 'insertCols', 'deleteCols', 'addSheet', 'removeSheet', 'renameSheet', 'moveSheet'].includes(op.type) || (op.type === 'setCells' && op.reordersCells))) {
-          this.xlsxSource.structuralEdits = Math.max(0, (this.xlsxSource.structuralEdits ?? 0) + (options.origin === 'undo' ? -1 : 1));
-        }
+        if (this.xlsxSource) this.trackXlsxEdit(op, options.origin === 'undo');
         tx.ops.push(op);
         tx.inverse.unshift(...inverse);
       }
@@ -185,6 +183,30 @@ export class Workbook {
       }
       tx.structural ||= wasStructural;
       this.commit();
+    }
+  }
+
+  /**
+   * Counts edits the preserving XLSX writer must treat specially. Appended sheets
+   * and in-place sorts are verified from the model when saving; an added sheet
+   * is undone by removeSheet, so only a removal by the user counts as structural.
+   */
+  private trackXlsxEdit(op: Operation, undo: boolean): void {
+    const source = this.xlsxSource!;
+    const delta = undo ? -1 : 1;
+    if (op.type === 'setCells' && op.reordersCells === 'sort') {
+      const sorted = { ...source.sortedSheets };
+      const count = Math.max(0, (sorted[op.sheet] ?? 0) + delta);
+      if (count) sorted[op.sheet] = count;
+      else delete sorted[op.sheet];
+      // Replaced rather than mutated: snapshots share the source object's members.
+      if (Object.keys(sorted).length) source.sortedSheets = sorted;
+      else delete source.sortedSheets;
+      return;
+    }
+    if (op.type === 'addSheet' || (op.type === 'removeSheet' && undo)) return;
+    if (['insertRows', 'deleteRows', 'insertCols', 'deleteCols', 'removeSheet', 'renameSheet', 'moveSheet'].includes(op.type) || (op.type === 'setCells' && op.reordersCells)) {
+      source.structuralEdits = Math.max(0, (source.structuralEdits ?? 0) + delta);
     }
   }
 
@@ -262,7 +284,7 @@ export class Workbook {
           tx.changed.add(gid(sheet.id, row, col));
           return { row, col, data: before, styleOnly };
         });
-        return [{ type: 'setCells', sheet: sheet.name, cells: prev, ...(op.reordersCells ? { reordersCells: true } : {}) }];
+        return [{ type: 'setCells', sheet: sheet.name, cells: prev, ...(op.reordersCells ? { reordersCells: op.reordersCells } : {}) }];
       }
       case 'insertRows':
       case 'insertCols': {

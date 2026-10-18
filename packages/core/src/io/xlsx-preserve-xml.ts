@@ -8,8 +8,30 @@ export interface XmlSpan {
 }
 export interface XmlEdit { start: number; end: number; value: string }
 
-export function protect(reason: string): never {
-  throw new Error(`XLSX-Schutz: ${reason} Diese Änderung kann noch nicht verlustfrei gespeichert werden. Die Originaldatei wurde nicht überschrieben.`);
+export type XlsxMessageLanguage = 'de' | 'en';
+let messageLanguage: XlsxMessageLanguage = 'de';
+
+/** Language of XLSX protection messages ('de' by default; other languages fall back to English). */
+export function setXlsxMessageLanguage(language: string): void {
+  messageLanguage = language.toLowerCase().startsWith('de') ? 'de' : 'en';
+}
+
+/** A save refused because the change cannot be stored without losing Excel content. */
+export class XlsxProtectionError extends Error {
+  readonly code = 'XLSX_PROTECTION';
+  /** The localized reason without the surrounding explanation. */
+  readonly reason: string;
+  constructor(readonly reasons: Record<XlsxMessageLanguage, string>, language = messageLanguage) {
+    super(language === 'de'
+      ? `XLSX-Schutz: ${reasons.de} Diese Änderung kann noch nicht verlustfrei gespeichert werden. Die Originaldatei wurde nicht überschrieben.`
+      : `XLSX protection: ${reasons.en} This change cannot be saved without loss yet. The original file was not overwritten.`);
+    this.name = 'XlsxProtectionError';
+    this.reason = reasons[language];
+  }
+}
+
+export function protect(de: string, en: string): never {
+  throw new XlsxProtectionError({ de, en });
 }
 
 /**
@@ -18,7 +40,7 @@ export function protect(reason: string): never {
  * to `maxDepth` (1 = root only), which keeps large worksheets cheap.
  */
 export function xmlRoot(xml: string, maxDepth = Infinity): XmlSpan {
-  if (/<!DOCTYPE/i.test(xml) || XMLValidator.validate(xml) !== true) protect('Nicht unterstützte oder ungültige XML-Struktur.');
+  if (/<!DOCTYPE/i.test(xml) || XMLValidator.validate(xml) !== true) protect('Nicht unterstützte oder ungültige XML-Struktur.', 'Unsupported or invalid XML structure.');
   const stack: XmlSpan[] = [];
   let root: XmlSpan | undefined;
   let i = 0;
@@ -27,7 +49,7 @@ export function xmlRoot(xml: string, maxDepth = Infinity): XmlSpan {
     if (xml.startsWith('<!--', i)) special = '-->';
     else if (xml.startsWith('<![CDATA[', i)) special = ']]>';
     else if (xml.startsWith('<?', i)) special = '?>';
-    if (special) { const end = xml.indexOf(special, i); if (end < 0) protect('XML-Abschluss fehlt.'); i = end + special.length; continue; }
+    if (special) { const end = xml.indexOf(special, i); if (end < 0) protect('XML-Abschluss fehlt.', 'Missing XML terminator.'); i = end + special.length; continue; }
     let end = i + 1, quote = '';
     for (; end < xml.length; end++) {
       const char = xml[end]!;
@@ -37,28 +59,28 @@ export function xmlRoot(xml: string, maxDepth = Infinity): XmlSpan {
     }
     const token = xml.slice(i, end + 1);
     const qname = /^<\/?([^\s/>]+)/.exec(token)?.[1];
-    if (!qname) protect('XML-Elementname fehlt.');
+    if (!qname) protect('XML-Elementname fehlt.', 'Missing XML element name.');
     if (token.startsWith('</')) {
       const node = stack.pop();
-      if (!node || node.qname !== qname) protect('XML-Verschachtelung ist ungültig.');
+      if (!node || node.qname !== qname) protect('XML-Verschachtelung ist ungültig.', 'Invalid XML nesting.');
       node.closeStart = i; node.end = end + 1;
     } else {
       const node: XmlSpan = { name: qname.split(':').at(-1)!, qname, start: i, openEnd: end + 1, closeStart: end + 1, end: end + 1, children: [] };
       // Elements below maxDepth are tracked for nesting only and not attached to the tree.
       if (stack.length && stack.length < maxDepth) stack.at(-1)!.children.push(node);
-      else if (!stack.length) { if (root) protect('Mehrere XML-Wurzelelemente.'); root = node; }
+      else if (!stack.length) { if (root) protect('Mehrere XML-Wurzelelemente.', 'Multiple XML root elements.'); root = node; }
       if (token[token.length - 2] !== '/') stack.push(node);
     }
     i = end + 1;
   }
-  if (!root || stack.length) protect('Unvollständiges XML.');
+  if (!root || stack.length) protect('Unvollständiges XML.', 'Incomplete XML.');
   return root;
 }
 
 export function child(node: XmlSpan, name: string): XmlSpan | undefined {
   const found = node.children.filter((c) => c.name === name);
-  if (found.length > 1) protect(`Doppeltes XML-Element ${name}.`);
-  if (found.some((c) => c.qname !== prefix(node) + name)) protect(`Nicht unterstützte XML-Namensraumzuordnung bei ${name}.`);
+  if (found.length > 1) protect(`Doppeltes XML-Element ${name}.`, `Duplicate XML element ${name}.`);
+  if (found.some((c) => c.qname !== prefix(node) + name)) protect(`Nicht unterstützte XML-Namensraumzuordnung bei ${name}.`, `Unsupported XML namespace mapping for ${name}.`);
   return found[0];
 }
 export function raw(xml: string, node: XmlSpan): string { return xml.slice(node.start, node.end); }
@@ -81,7 +103,7 @@ export function editXml(xml: string, edits: XmlEdit[]): string {
   const sorted = [...edits].sort((a, b) => b.start - a.start || b.end - a.end);
   let limit = xml.length;
   for (const edit of sorted) {
-    if (edit.end > limit || edit.start < 0 || edit.end < edit.start) protect('Überlappende XML-Änderungen.');
+    if (edit.end > limit || edit.start < 0 || edit.end < edit.start) protect('Überlappende XML-Änderungen.', 'Overlapping XML edits.');
     xml = xml.slice(0, edit.start) + edit.value + xml.slice(edit.end);
     limit = edit.start;
   }
@@ -97,7 +119,8 @@ export function setChild(xml: string, name: string, value: string, before: strin
   const root = xmlRoot(xml), found = child(root, name);
   if (found) return editXml(xml, [{ start: found.start, end: found.end, value }]);
   if (!value) return xml;
-  if (root.closeStart === root.openEnd && /\/\s*>$/.test(xml.slice(root.start, root.openEnd))) return contents(xml, root, value);
+  // Edit the root span only, so an XML declaration before it is kept.
+  if (root.closeStart === root.openEnd && /\/\s*>$/.test(xml.slice(root.start, root.openEnd))) return editXml(xml, [{ start: root.start, end: root.end, value: contents(xml, root, value) }]);
   const position = root.children.find((n) => before.includes(n.name))?.start ?? root.closeStart;
   return editXml(xml, [{ start: position, end: position, value }]);
 }

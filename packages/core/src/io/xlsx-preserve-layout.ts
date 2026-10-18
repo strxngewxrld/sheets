@@ -10,7 +10,7 @@ export function patchLayout(xml: string, before: SheetData, after: SheetData): s
     const existing = cols?.children.filter((n) => n.name === 'col').map((node) => ({ node, min: Number(nodeAttribute(xml, node, 'min')) - 1, max: Number(nodeAttribute(xml, node, 'max')) - 1 })) ?? [];
     let last = -1;
     for (const c of existing) {
-      if (!Number.isInteger(c.min) || !Number.isInteger(c.max) || c.min <= last || c.max < c.min) protect('Überlappende oder unsortierte Spaltendefinitionen.');
+      if (!Number.isInteger(c.min) || !Number.isInteger(c.max) || c.min <= last || c.max < c.min) protect('Überlappende oder unsortierte Spaltendefinitionen.', 'Overlapping or unsorted column definitions.');
       last = c.max;
     }
     const make = (original: string, index: number, end = index, apply = true) => {
@@ -18,7 +18,7 @@ export function patchLayout(xml: string, before: SheetData, after: SheetData): s
       open = setAttribute(setAttribute(open, 'min', index + 1), 'max', end + 1);
       if (apply) {
         const value = after.colWidths?.[index];
-        if (value !== undefined && (!Number.isFinite(value) || value < 0)) protect('Ungültige Spaltenbreite.');
+        if (value !== undefined && (!Number.isFinite(value) || value < 0)) protect('Ungültige Spaltenbreite.', 'Invalid column width.');
         if (value === 0) open = setAttribute(open, 'hidden', 1);
         else {
           open = setAttribute(open, 'width', value === undefined ? undefined : Math.max(0, Math.round((value - 5) / 7 * 100) / 100));
@@ -33,7 +33,7 @@ export function patchLayout(xml: string, before: SheetData, after: SheetData): s
       const within = columns.filter((i) => i >= c.min && i <= c.max);
       if (!within.length) continue;
       const boundaries = [...new Set([c.min, c.max + 1, ...within.flatMap((i) => [i, i + 1])])].sort((a, b) => a - b);
-      if (boundaries.length > 2 && c.node.children.length) protect('Nicht teilbare erweiterte Spaltendefinition.');
+      if (boundaries.length > 2 && c.node.children.length) protect('Nicht teilbare erweiterte Spaltendefinition.', 'Extended column definition cannot be split.');
       const original = raw(xml, c.node);
       const value = boundaries.slice(0, -1).map((i, k) => make(original, i, boundaries[k + 1]! - 1, within.includes(i))).join('');
       edits.push({ start: c.node.start, end: c.node.end, value });
@@ -50,7 +50,7 @@ export function patchLayout(xml: string, before: SheetData, after: SheetData): s
   const rows = changed(before.rowHeights, after.rowHeights);
   if (rows.length) {
     const root = xmlRoot(xml), p = prefix(root), data = child(root, 'sheetData');
-    if (!data) protect('sheetData fehlt.');
+    if (!data) protect('sheetData fehlt.', 'sheetData is missing.');
     let rowIndex = -1;
     const existing = data.children.filter((n) => n.name === 'row').map((node) => {
       rowIndex = Number(nodeAttribute(xml, node, 'r') ?? rowIndex + 2) - 1; return { index: rowIndex, node };
@@ -58,12 +58,12 @@ export function patchLayout(xml: string, before: SheetData, after: SheetData): s
     const edits: XmlEdit[] = [], inserted = new Map<number, string>();
     for (const index of rows) {
       const old = existing.find((r) => r.index === index);
-      if (!old && existing.some((r) => nodeAttribute(xml, r.node, 'r') === undefined)) protect('Neue Zeilen bei impliziten Original-Zeilenadressen.');
+      if (!old && existing.some((r) => nodeAttribute(xml, r.node, 'r') === undefined)) protect('Neue Zeilen bei impliziten Original-Zeilenadressen.', 'New rows in a sheet with implicit row addresses.');
       if (!old && after.rowHeights?.[index] === undefined) continue;
       const original = old ? raw(xml, old.node) : `<${p}row r="${index + 1}"/>`;
       const root = xmlRoot(original); let open = original.slice(0, root.openEnd);
       const value = after.rowHeights?.[index];
-      if (value !== undefined && (!Number.isFinite(value) || value < 0)) protect('Ungültige Zeilenhöhe.');
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) protect('Ungültige Zeilenhöhe.', 'Invalid row height.');
       if (value === 0) open = setAttribute(open, 'hidden', 1);
       else {
         open = setAttribute(open, 'ht', value === undefined ? undefined : Math.round(value * 75) / 100);

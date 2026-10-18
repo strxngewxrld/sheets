@@ -15,7 +15,7 @@ export class PreservedStyles {
   private item(collection: string, index: number): string {
     const root = xmlRoot(this.xml), group = child(root, collection);
     const item = group?.children.filter((n) => n.name === ITEMS[collection])[index];
-    if (!item) protect(`Style-Referenz ${collection}[${index}] ist ungültig.`);
+    if (!item) protect(`Style-Referenz ${collection}[${index}] ist ungültig.`, `Invalid style reference ${collection}[${index}].`);
     return raw(this.xml, item);
   }
 
@@ -39,11 +39,22 @@ export class PreservedStyles {
     return editXml(xml, [{ start: root.start, end: root.openEnd, value: open }]);
   }
 
+  /** Everything a cell format record resolves to; equal fingerprints format cells identically. */
+  fingerprint(index: number): string {
+    const xf = this.item('cellXfs', index);
+    const open = xf.slice(0, xmlRoot(xf).openEnd);
+    const id = attribute(open, 'numFmtId') ?? '0';
+    const root = xmlRoot(this.xml);
+    const numFmt = child(root, 'numFmts')?.children.find((n) => n.name === 'numFmt' && nodeAttribute(this.xml, n, 'numFmtId') === id);
+    const part = (collection: string, attr: string) => this.item(collection, Number(attribute(open, attr) ?? 0));
+    return [xf.replace(/^<[^\s/>]+/, ''), part('fonts', 'fontId'), part('fills', 'fillId'), part('borders', 'borderId'), numFmt ? nodeAttribute(this.xml, numFmt, 'formatCode') : `#${id}`].join('\u0000');
+  }
+
   get(original: number, before: CellStyle = {}, after: CellStyle = {}): number {
     const changed = STYLE_KEYS.filter((key) => canonical(before[key]) !== canonical(after[key]));
     if (!changed.length) return original;
-    for (const key of ['color', 'fill'] as const) if (changed.includes(key) && after[key] && !/^#[0-9a-f]{6}$/i.test(after[key]!)) protect('Ungültige Style-Farbe.');
-    if (changed.includes('fontSize') && after.fontSize !== undefined && (!Number.isFinite(after.fontSize) || after.fontSize <= 0)) protect('Ungültige Schriftgröße.');
+    for (const key of ['color', 'fill'] as const) if (changed.includes(key) && after[key] && !/^#[0-9a-f]{6}$/i.test(after[key]!)) protect('Ungültige Style-Farbe.', 'Invalid style color.');
+    if (changed.includes('fontSize') && after.fontSize !== undefined && (!Number.isFinite(after.fontSize) || after.fontSize <= 0)) protect('Ungültige Schriftgröße.', 'Invalid font size.');
     const cacheKey = canonical([original, changed.map((key) => [key, after[key]])]);
     const known = this.cache.get(cacheKey); if (known !== undefined) return known;
     let xf = this.item('cellXfs', original);
@@ -74,7 +85,7 @@ export class PreservedStyles {
         const entries = group?.children.filter((n) => n.name === 'numFmt') ?? [];
         const existing = entries.find((n) => nodeAttribute(this.xml, n, 'formatCode') === after.numFmt);
         id = existing ? Number(nodeAttribute(this.xml, existing, 'numFmtId')) : Math.max(163, ...entries.map((n) => Number(nodeAttribute(this.xml, n, 'numFmtId')))) + 1;
-        if (!Number.isInteger(id) || id < 0) protect('Ungültige Zahlenformat-Referenz.');
+        if (!Number.isInteger(id) || id < 0) protect('Ungültige Zahlenformat-Referenz.', 'Invalid number format reference.');
         if (!existing) this.append('numFmts', `<${p}numFmt numFmtId="${id}" formatCode="${escapeXml(after.numFmt)}"/>`);
       }
       updates.numFmtId = id; updates.applyNumberFormat = 1;

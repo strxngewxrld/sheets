@@ -456,7 +456,7 @@ export function sortRange(
       cells.push({ row, col: r.start.col + j, data });
     });
   });
-  wb.apply({ type: 'setCells', sheet: s.name, cells, reordersCells: true }, options);
+  wb.apply({ type: 'setCells', sheet: s.name, cells, reordersCells: 'sort' }, options);
 }
 
 // ---------------------------------------------------------------------------

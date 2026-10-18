@@ -26,7 +26,11 @@ export interface SizePatch {
  * collaboration, logging and remote control (e.g. by AI agents).
  */
 export type Operation =
-  | { type: 'setCells'; sheet: string; cells: CellPatch[]; reordersCells?: boolean }
+  /**
+   * `reordersCells` marks moved content: `'sort'` reorders rows of a range in place,
+   * `true` moves cells elsewhere (cut and paste).
+   */
+  | { type: 'setCells'; sheet: string; cells: CellPatch[]; reordersCells?: boolean | 'sort' }
   | { type: 'insertRows'; sheet: string; index: number; count: number }
   | { type: 'deleteRows'; sheet: string; index: number; count: number }
   | { type: 'insertCols'; sheet: string; index: number; count: number }
@@ -56,5 +60,12 @@ export interface WorkbookData {
   activeSheet?: number;
   pivotTables?: PivotTableSpec[];
   /** Original OPC package and normalized import model, retained through JSON/undo. */
-  xlsxSource?: { archive: string; baseline?: Omit<WorkbookData, 'xlsxSource'>; structuralEdits?: number };
+  xlsxSource?: {
+    archive: string;
+    baseline?: Omit<WorkbookData, 'xlsxSource'>;
+    /** Applied structural operations that the preserving writer cannot patch (undo decrements). */
+    structuralEdits?: number;
+    /** Applied sorts per sheet name; such sheets are patched with additional safeguards. */
+    sortedSheets?: Record<string, number>;
+  };
 }

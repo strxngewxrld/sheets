@@ -65,4 +65,5 @@ export function saveWorkbook(wb: Workbook, format: FileFormat, options: SaveOpti
 
 export * from './csv.js';
 export { readXlsx, xlsxToData, charWidthToPx, pointsToPx, type XlsxReadOptions } from './xlsx-read.js';
+export { XlsxProtectionError, setXlsxMessageLanguage, type XlsxMessageLanguage } from './xlsx-preserve-xml.js';
 export { writeXlsx, chartXml, pxToCharWidth, pxToPoints, type XlsxWriteOptions } from './xlsx-write.js';

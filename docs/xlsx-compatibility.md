@@ -6,7 +6,21 @@ Beim Import behält Sheets die vollständige ursprüngliche XLSX-Datei samt eine
 
 Ohne fachliche Änderung liefert der Writer die ursprünglichen Dateibytes zurück. Bei unterstützten Änderungen werden die betroffenen Zellwerte, Formeln, Größenattribute oder Style-Referenzen gezielt im ursprünglichen XML geändert. Alle anderen ZIP-Einträge werden mit ihrem ursprünglichen Inhalt übernommen. Vorhandene Relationships und Content Types bleiben erhalten; Style-Ressourcen werden angehängt, sodass ursprüngliche Indizes gültig bleiben.
 
-Ein vollständiger Neuaufbau ist nur zulässig, wenn das Original nachweislich exakt dem Output unseres Writers für das Importmodell entspricht (abgesehen von Erstellungs-/Änderungszeitpunkten) und die Formeln verstanden werden. Andernfalls scheitern Struktur-, Sortier-, Tabellen-, Diagramm- und Regeländerungen mit `XLSX-Schutz`. Es gibt keinen Schalter zum Erzwingen eines verlustbehafteten XLSX-Exports.
+Ein vollständiger Neuaufbau ist nur zulässig, wenn das Original nachweislich exakt dem Output unseres Writers für das Importmodell entspricht (abgesehen von Erstellungs-/Änderungszeitpunkten) und die Formeln verstanden werden. Andernfalls scheitern Struktur-, Tabellen-, Diagramm- und Regeländerungen mit `XLSX-Schutz`; für Sortieren, neue Blätter und fehlende Style-Tabellen gelten die gezielten Pfade unten. Es gibt keinen Schalter zum Erzwingen eines verlustbehafteten XLSX-Exports.
+
+## Gezielt erlaubte Änderungen in beliebigen Dateien
+
+Diese Änderungen werden direkt in das erhaltene Originalpaket eingefügt. Tests belegen jeweils, dass alle übrigen ZIP-Einträge byte-identisch bleiben (eigene Testpakete und die openpyxl-Datei `excel-features.xlsx`).
+
+| Änderung | Was geschrieben wird | Bleibt blockiert |
+| --- | --- | --- |
+| **Sortieren** eines Zellbereichs | Nur die Zellen in `sheetData`, deren Inhalt sich ändert (wie eine Zelländerung), plus das Neuberechnungskennzeichen in `workbook.xml`. Jede Zelle erhält exakt den ursprünglichen Formatdatensatz (`s`-Index) der Zelle, deren Darstellung sie übernimmt, sodass auch nicht dargestellte Formatanteile (Drehung, Hochstellung, Schutz) mitwandern. Formeln, die nur auf die eigene Zeile verweisen (`=B2*2`), bleiben dadurch textgleich und unverändert. | Zellen mit Notizen/Kommentaren oder Hyperlinks, Bereiche in nativen Excel-Tabellen, mit Datenüberprüfung oder verbundenen Zellen; Formeln mit relativen Bezügen auf andere Zeilen oder unbekannten Funktionen; Zahlen, deren gespeicherter Text genauer ist als eine Gleitkommazahl (z. B. `9007199254740993`); gleich dargestellte Zellen mit unterschiedlichen Excel-Formatdatensätzen; zusätzlich alle Schutzregeln für Zelländerungen (Rich Text, Zellmetadaten, geteilte/Matrixformeln, Berechnungskette bei Formeländerungen, Pivot-Ausgaben, Datumssystem 1904, Blattschutz). Ausschneiden und Einfügen bleibt als Strukturänderung blockiert. |
+| **Neues Blatt am Ende** | Ein neuer Teil `xl/worksheets/sheetN.xml` mit Zellen, Spaltenbreiten, Zeilenhöhen und Datenüberprüfung, ein zusätzlicher Eintrag in `<sheets>` (neue `sheetId`, neue Relationship-ID) sowie je ein angehängtes Element in `xl/_rels/workbook.xml.rels` und `[Content_Types].xml`. Bestehende Einträge, `definedNames` (inklusive `localSheetId`), Blattreihenfolge und alle anderen Teile bleiben unverändert. `docProps/app.xml` wird nicht angepasst (die Blattliste dort ist nur informativ). | Einfügen an anderer Position, Umbenennen, Löschen und Verschieben von Blättern; neue Blätter mit Diagrammen, Tabellen, bedingten Formaten, Notizen, verbundenen Zellen, fixierten Bereichen oder abweichender Standardgröße; Namen, die bereits ein (auch im Editor unsichtbares) Diagrammblatt trägt; Strict-Open-XML-Dateien. |
+| **Formatierung ohne Style-Tabelle** | Fehlt `styles.xml` vollständig, wird eine minimale gültige Style-Tabelle neu angelegt (Relationship und Content Type werden angehängt) und Formate wie üblich angefügt. Unformatierte Zellen zeigen danach die Standardschrift Calibri 11. | Dateien, deren Style-Relationship auf einen fehlenden Teil zeigt, oder die bereits einen nicht verknüpften Teil `styles.xml` enthalten. |
+
+Umbenennen und Löschen bleiben bewusst blockiert: Blattnamen stehen auch in Diagrammbezügen, definierten Namen, Pivot-Caches, Hyperlinks und Erweiterungen, und Löschen verschiebt `localSheetId`-Indizes und die Berechnungskette. Diese Stellen lassen sich nicht vollständig nachweisbar anpassen.
+
+Die Gründe einer Schutzmeldung folgen der Sprache der Oberfläche (Deutsch oder Englisch, `setXlsxMessageLanguage`). Fehler sind `XlsxProtectionError` mit dem Code `XLSX_PROTECTION`; der Text beginnt mit `XLSX-Schutz:` bzw. `XLSX protection:`. MCP-Server und Agent-Werkzeuge melden standardmäßig Deutsch.
 
 ## Aktueller Umfang
 
@@ -38,7 +52,15 @@ VS Code legt Wiederherstellungssicherungen als separates JSON-Format ab. Dadurch
 
 Vor dem Überschreiben wird außerdem geprüft, ob die Datei seit dem Einlesen beziehungsweise letzten Speichern extern verändert wurde. Erkannte Konflikte werden verweigert. Das ist keine Betriebssystem-Sperre gegen zeitgleiche Schreibzugriffe anderer Programme.
 
-CSV/TSV sind weiterhin ausdrücklich einfache Werteformate: Sie können weder mehrere Blätter noch Excel-Metadaten tragen. Ein bewusster CSV-Export ist eine Formatkonvertierung; der XLSX-Erhaltungspfad betrifft XLSX-Dateien.
+CSV/TSV sind weiterhin ausdrücklich einfache Werteformate: Sie können weder mehrere Blätter noch Excel-Metadaten tragen. Ein bewusster CSV-Export ist eine Formatkonvertierung; der XLSX-Erhaltungspfad betrifft XLSX-Dateien. Enthält ein CSV-Dokument beim Speichern Inhalte, die CSV nicht aufnehmen kann und die beim Öffnen noch nicht vorhanden waren (weitere Blätter, Diagramme, Formeln, Formatierungen, Tabellen, Regeln, Notizen), zeigt der Editor einmal pro Dokument einen nicht blockierenden Hinweis, dass nur die Werte des aktiven Blatts gespeichert werden. „Speichern unter“ schreibt das Format der Zieldatei.
+
+### CSV ohne Änderung öffnen und speichern
+
+Beim Lesen werden nur verlustfrei darstellbare Werte typisiert: Zahlen in der Schreibweise der Datei (Dezimalzeichen und korrekte Tausendergruppen des Gebietsschemas, höchstens 15 signifikante Stellen) und `TRUE`/`FALSE`. Führende Nullen, Exponenten, Vorzeichen `+`, `-0`, fremde Dezimalzeichen (`1.23` in einer Semikolon-Datei), Datumswerte, Uhrzeiten, Prozent- und Währungsangaben bleiben Text. Zeilenende (CRLF/LF), ein fehlender Schluss-Zeilenumbruch und eine UTF-8-BOM werden beim Speichern übernommen. Normalisiert werden weiterhin: unnötige Nullen und Tausendertrenner von Zahlen (`1.234,50` → `1234,5`), überflüssige Anführungszeichen, das Auffüllen kürzerer Zeilen auf die Breite der Tabelle und Anführungszeichen um Werte mit Leerzeichen am Rand. Dateien, die nicht UTF-8-kodiert sind (z. B. Windows-1252), werden als UTF-8 gelesen und geschrieben.
+
+### Formel-Injektion (CSV)
+
+`writeCsv` schreibt Zellwerte unverändert, auch wenn sie mit `=`, `+`, `-` oder `@` beginnen; Formeln werden standardmäßig als Ergebnis geschrieben, nur mit `formulas: true` als `=…`. So bleibt eine geöffnete und gespeicherte Datei unverändert. Tabellenprogramme können solche Texte beim Öffnen als Formel ausführen („CSV Injection“). Wer CSV-Dateien für Dritte aus nicht vertrauenswürdigen Daten erzeugt, sollte das berücksichtigen. Ein möglicher, nicht eingebauter optionaler Export-Schalter wäre `writeCsv(wb, sheet, { escapeFormulas: true })` (bzw. ein eigener Befehl „Als CSV für Excel exportieren (Formeln entschärfen)“), der Textzellen mit diesen Anfangszeichen sowie Tab/CR ein `'` voranstellt, Zahlen wie `-5` aber unverändert lässt; er dürfte nie für das normale Speichern eines CSV-Dokuments gelten.
 
 ## Prüfungen
 
@@ -47,6 +69,7 @@ CSV/TSV sind weiterhin ausdrücklich einfache Werteformate: Sie können weder me
 - Kein Dateischreiben bei Schutzfehlern und erkannten externen Änderungen.
 - Unbekannte Formeln, Matrixbereiche, Rich Text, numerische Originalpräzision, Datumsmodus 1904 und Signaturen.
 - Append-only Styles mit unbekannten Schrift-, Rahmen-, Ausrichtungs- und Schutzattributen.
+- Sortieren mit exakter Mitnahme der Formatdatensätze sowie alle oben genannten Sperren; neues Blatt am Ende (auch in `excel-features.xlsx` mit lokalen Namen und sehr verstecktem Blatt); neue Style-Tabelle für Dateien ohne `styles.xml`; leere und nur aus Leerraum bestehende XML-Elemente (`<cols/>`, `<sheetViews> </sheetViews>`, leere Style-Sammlungen).
 - Eine unabhängige openpyxl-Testdatei in `packages/core/test/fixtures/excel-features.xlsx` mit Bildern, Kommentaren, Verbindungen zwischen Teilen, Datenüberprüfung, Data Bars, Diagramm, lokalen Namen, Druckeinstellungen und ausgeblendeten Inhalten.
 - Zusätzlich wurde die Microsoft-Datei „Financial Sample.xlsx“ geprüft: Die 26 ursprünglichen Teile bleiben erhalten; bei einer Zell-/Formatänderung werden ausschließlich Blatt, Style-Ergänzungen und Berechnungskennzeichen geändert. Der native Stil `TableStyleLight9` bleibt bestehen.
 
