@@ -159,7 +159,9 @@ export const CSS = `
 .sx-menu hr { border: 0; border-top: 1px solid var(--sx-grid); margin: 4px 0; }
 .sx-dialog {
   position: absolute; z-index: 50; right: 16px; top: 16px; width: 280px; background: var(--sx-menu-bg); color: var(--sx-menu-fg);
-  border: 1px solid var(--sx-grid); border-radius: 8px; box-shadow: var(--sx-shadow); padding: 12px; display: grid; gap: 8px; font-size: 13px;
+  border: 1px solid var(--sx-grid); border-radius: 8px; box-shadow: var(--sx-shadow); padding: 12px 12px 0; display: grid; gap: 8px; font-size: 13px;
+  /* Never taller than the editor: the content scrolls and the buttons stay reachable at the bottom. */
+  box-sizing: border-box; max-height: calc(100% - 32px); overflow-y: auto; overscroll-behavior: contain;
 }
 .sx-dialog h3 { margin: 0 0 4px; font-size: 14px; }
 .sx-dialog label { display: grid; gap: 3px; font-size: 12px; color: var(--sx-muted); }
@@ -181,7 +183,8 @@ export const CSS = `
 .sx-table-controls { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .sx-table-sort { position: absolute; pointer-events: auto; width: 16px; height: 18px; padding: 0; border: 1px solid currentColor; border-radius: 2px; background: transparent; font: 11px sans-serif; cursor: pointer; opacity: 0.85; }
 .sx-table-sort:hover, .sx-table-sort:focus-visible { opacity: 1; background: rgba(128,128,128,0.3); outline: 1px solid var(--sx-accent); }
-.sx-dialog .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.sx-dialog .sx-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; position: sticky; bottom: 0; z-index: 1; padding: 8px 0 12px; background: var(--sx-menu-bg); }
+.sx-dialog > :last-child:not(.sx-actions) { margin-bottom: 12px; }
 .sx-dialog .sx-actions button { height: 28px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--sx-input-border); background: var(--sx-input-bg); color: inherit; cursor: pointer; font: inherit; }
 .sx-dialog .sx-actions button.sx-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
 .sx-validation-btn { position: absolute; z-index: 6; width: 18px; padding: 0; border: 1px solid var(--sx-input-border); border-radius: 2px; background: var(--sx-menu-bg); color: var(--sx-fg); font: 11px sans-serif; cursor: pointer; }
