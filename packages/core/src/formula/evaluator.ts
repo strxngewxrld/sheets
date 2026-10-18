@@ -25,6 +25,8 @@ export interface EvalContext {
   /** Returns the values of a range. Implementations may clip trailing empty rows/cols. */
   getRange(sheet: string, range: RangeAddress): Matrix;
   sheetExists(sheet: string): boolean;
+  /** Sheet names in workbook order (SHEET, SHEETS). */
+  sheetNames?(): string[];
   /** Resolves a defined name to its parsed formula. */
   resolveName(name: string): Node | undefined;
   /** Parses a reference string (for INDIRECT). */

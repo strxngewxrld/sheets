@@ -1,4 +1,4 @@
-import { colToName, formatAddress, normalizeRange } from '../../address.js';
+import { colToName, formatAddress, MAX_COLS, MAX_ROWS, normalizeRange, quoteSheetName } from '../../address.js';
 import { Err, isError, type Scalar } from '../../values.js';
 import { compareScalars, isRef, toMatrix, toScalar, type EvalValue, type FunctionContext, type Matrix } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
@@ -158,6 +158,31 @@ export const lookupFunctions: FunctionDef[] = [
     if (!node || (node.type !== 'cell' && node.type !== 'range')) return Err.REF;
     return ctx.evaluate(node);
   }, { minArgs: 1, maxArgs: 2, volatile: true }),
+  def('ADDRESS', 'lookup', 'ADDRESS(row_num, column_num, [abs_num], [a1], [sheet_text])', 'Cell address as text (abs_num 1 = $A$1, 2 = A$1, 3 = $A1, 4 = A1).', ([r, c, abs, a1, sheet], ctx) => {
+    const row = Math.trunc(numArg(r, ctx));
+    const col = Math.trunc(numArg(c, ctx));
+    const mode = Math.trunc(numArg(abs, ctx, 1));
+    if (row < 1 || col < 1 || row > MAX_ROWS || col > MAX_COLS || mode < 1 || mode > 4) return Err.VALUE;
+    const absRow = mode === 1 || mode === 2, absCol = mode === 1 || mode === 3;
+    const ref = boolArg(a1, ctx, true)
+      ? formatAddress(row - 1, col - 1, absRow, absCol)
+      : `R${absRow ? row : `[${row}]`}C${absCol ? col : `[${col}]`}`;
+    if (sheet === undefined || sheet === null) return ref;
+    const name = textArg(sheet, ctx);
+    return `${name === '' ? '' : quoteSheetName(name)}!${ref}`;
+  }, { minArgs: 2, maxArgs: 5 }),
+  def('AREAS', 'lookup', 'AREAS(reference)', 'Number of areas in a reference.', ([ref]) => (isRef(ref!) ? 1 : Err.VALUE), { minArgs: 1, maxArgs: 1 }),
+  def('SHEET', 'lookup', 'SHEET([value])', 'Sheet number of a reference or sheet name.', ([v], ctx) => {
+    const names = ctx.sheetNames?.() ?? [ctx.sheet];
+    const target = v === undefined ? ctx.sheet : isRef(v) ? v.sheet : scalarArg(v, ctx);
+    if (isError(target)) return target;
+    const index = typeof target === 'string' ? names.findIndex((n) => n.toUpperCase() === target.toUpperCase()) : -1;
+    return index < 0 ? Err.NA : index + 1;
+  }, { maxArgs: 1, volatile: true }),
+  def('SHEETS', 'lookup', 'SHEETS([reference])', 'Number of sheets in the workbook or in a reference.', ([ref], ctx) => {
+    if (ref === undefined) return (ctx.sheetNames?.() ?? [ctx.sheet]).length;
+    return isRef(ref) ? 1 : Err.VALUE;
+  }, { maxArgs: 1, volatile: true }),
   def('TRANSPOSE', 'lookup', 'TRANSPOSE(array)', 'Swaps rows and columns.', ([a], ctx) => {
     const m = toMatrix(a!, ctx);
     const cols = m[0]?.length ?? 0;

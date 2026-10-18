@@ -1,11 +1,11 @@
 import { formatValue, parseNumber } from '../../numfmt.js';
 import { CellError, Err, isError, type Scalar } from '../../values.js';
-import { broadcast, deref, toMatrix, toText, type EvalContext, type EvalValue, type Matrix } from '../evaluator.js';
+import { broadcast, deref, toMatrix, toNumber, toText, type EvalContext, type EvalValue, type Matrix } from '../evaluator.js';
 import type { EagerFunctionDef, FunctionDef } from '../registry.js';
 import { boolArg, def, numArg, scalarArg, scalarsOf, textArg, wildcardToRegExp } from './helpers.js';
 
 /** Text function of one argument, broadcast over arrays. */
-function text1(name: string, description: string, f: (s: string) => string | number): FunctionDef {
+function text1(name: string, description: string, f: (s: string) => string | number | CellError): FunctionDef {
   return def(name, 'text', `${name}(text)`, description, ([a], ctx) =>
     broadcast([deref(a!, ctx)], (v) => {
       const s = toText(v);
@@ -13,6 +13,18 @@ function text1(name: string, description: string, f: (s: string) => string | num
     }),
     { minArgs: 1, maxArgs: 1 },
   );
+}
+
+/** VALUETOTEXT / ARRAYTOTEXT: format 0 (concise) or 1 (strict, text in quotes). */
+function formatFlag(v: EvalValue | undefined, ctx: EvalContext): boolean | CellError {
+  const f = Math.trunc(numArg(v, ctx, 0));
+  return f === 0 ? false : f === 1 ? true : Err.VALUE;
+}
+
+function valueText(v: Scalar, strict: boolean): string {
+  if (isError(v)) return v.code;
+  const s = toText(v) as string;
+  return strict && typeof v === 'string' ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /** Delimiters given as text or an array of texts; empty strings are dropped. */
@@ -209,6 +221,43 @@ export const textFunctions: FunctionDef[] = [
     const s = scalarArg(v, ctx);
     return typeof s === 'string' ? s : isError(s) ? s : '';
   }, { minArgs: 1, maxArgs: 1 }),
+  // Excel counts two bytes per character only for East Asian (DBCS) system languages.
+  text1('LENB', 'Number of characters (bytes in single-byte languages).', (s) => s.length),
+  def('UNICHAR', 'text', 'UNICHAR(number)', 'Unicode character for a code point.', ([n], ctx) => broadcast([deref(n!, ctx)], (v) => {
+    const code = toNumber(v);
+    if (isError(code)) return code;
+    const c = Math.trunc(code);
+    if (c < 1 || c > 0x10ffff) return Err.VALUE;
+    return c >= 0xd800 && c <= 0xdfff ? Err.NA : String.fromCodePoint(c);
+  }), { minArgs: 1, maxArgs: 1 }),
+  text1('UNICODE', 'Code point of the first character.', (s) => (s ? s.codePointAt(0)! : Err.VALUE)),
+  def('NUMBERVALUE', 'text', 'NUMBERVALUE(text, [decimal_separator], [group_separator])', 'Converts text to a number with the given separators.', ([t, d, g], ctx) => {
+    const v = scalarArg(t, ctx);
+    if (typeof v === 'number') return v;
+    const decimal = d === undefined ? '.' : textArg(d, ctx)[0];
+    const group = g === undefined ? ',' : textArg(g, ctx)[0];
+    if (decimal === undefined || group === undefined || decimal === group) return Err.VALUE;
+    let text = textArg(t, ctx).replace(/\s+/g, '');
+    if (text === '') return 0;
+    let percent = 0;
+    while (text.endsWith('%')) { text = text.slice(0, -1); percent++; }
+    const point = text.indexOf(decimal);
+    if (point >= 0 && (text.indexOf(decimal, point + 1) >= 0 || text.indexOf(group, point) >= 0)) return Err.VALUE;
+    const plain = text.split(group).join('').replace(decimal, '.');
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(plain)) return Err.VALUE;
+    return Number(plain) / 100 ** percent;
+  }, { minArgs: 1, maxArgs: 3 }),
+  def('VALUETOTEXT', 'text', 'VALUETOTEXT(value, [format])', 'Text of a value; format 1 quotes text.', ([v, f], ctx) => {
+    const strict = formatFlag(f, ctx);
+    return isError(strict) ? strict : valueText(scalarArg(v, ctx), strict);
+  }, { minArgs: 1, maxArgs: 2 }),
+  def('ARRAYTOTEXT', 'text', 'ARRAYTOTEXT(array, [format])', 'Text of an array; format 1 gives an array constant.', ([a, f], ctx) => {
+    const strict = formatFlag(f, ctx);
+    if (isError(strict)) return strict;
+    const m = toMatrix(a!, ctx);
+    if (!strict) return m.flat().map((v) => valueText(v, false)).join(', ');
+    return `{${m.map((row) => row.map((v) => valueText(v, true)).join(',')).join(';')}}`;
+  }, { minArgs: 1, maxArgs: 2 }),
   def('FIXED', 'text', 'FIXED(number, [decimals], [no_commas])', 'Formats a number with fixed decimals.', ([n, d, nc], ctx) => {
     const dec = Math.trunc(numArg(d, ctx, 2));
     const fmt = (boolArg(nc, ctx) ? '0' : '#,##0') + (dec > 0 ? '.' + '0'.repeat(dec) : '');

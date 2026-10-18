@@ -104,7 +104,7 @@ describe('financial functions', () => {
 
   it('exposes metadata for autocomplete and function discovery', () => {
     expect(listFunctions().filter((f) => f.category === 'financial').map((f) => f.name))
-      .toEqual(['FV', 'IPMT', 'IRR', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV', 'RATE', 'XIRR']);
+      .toEqual(['CUMIPMT', 'CUMPRINC', 'DB', 'DDB', 'EFFECT', 'FV', 'IPMT', 'IRR', 'NOMINAL', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV', 'RATE', 'SLN', 'SYD', 'XIRR', 'XNPV']);
   });
 });
 

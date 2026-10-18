@@ -371,6 +371,7 @@ export class CalcEngine {
         return this.rangeValues(s, range);
       },
       sheetExists: (name) => !!wb.getSheet(name),
+      sheetNames: () => wb.sheets.map((s) => s.name),
       resolveName: (name) => {
         const ref = wb.names.get(name.toUpperCase());
         if (!ref) return undefined;

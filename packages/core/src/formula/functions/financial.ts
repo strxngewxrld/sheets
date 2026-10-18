@@ -1,4 +1,4 @@
-import { Err, isError } from '../../values.js';
+import { Err, isError, type CellError } from '../../values.js';
 import { checkNumber, toMatrix, type EvalValue, type FunctionContext } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
 import { bail, def, numArg, scalarsOf } from './helpers.js';
@@ -44,13 +44,63 @@ function periodPayment(name: 'IPMT' | 'PPMT'): FunctionDef {
       const type = paymentType(t, ctx);
       if (per < 1 || per > periods) return Err.NUM;
       const pmt = payment(rate, periods, present, future, type);
-      let interest = 0;
-      if (rate !== 0 && !(type === 1 && per === 1)) {
-        interest = futureValue(rate, per - 1, pmt, present, type) * rate;
-        if (type === 1) interest /= 1 + rate;
-      }
+      const interest = interestPart(rate, per, pmt, present, type);
       return checkNumber(name === 'IPMT' ? interest : pmt - interest);
     }, { minArgs: 4, maxArgs: 6 });
+}
+
+/** Interest in the payment of period `per` (IPMT). */
+function interestPart(rate: number, per: number, pmt: number, present: number, type: number): number {
+  if (rate === 0 || (type === 1 && per === 1)) return 0;
+  const interest = futureValue(rate, per - 1, pmt, present, type) * rate;
+  return type === 1 ? interest / (1 + rate) : interest;
+}
+
+/** CUMIPMT / CUMPRINC: interest or principal paid from period start to end. */
+function cumulative(name: 'CUMIPMT' | 'CUMPRINC'): FunctionDef {
+  return def(name, 'financial', `${name}(rate, nper, pv, start_period, end_period, type)`,
+    name === 'CUMIPMT' ? 'Cumulative interest paid between two periods.' : 'Cumulative principal paid between two periods.',
+    ([r, n, pv, s, e, t], ctx) => {
+      const rate = numArg(r, ctx);
+      const periods = numArg(n, ctx);
+      const present = numArg(pv, ctx);
+      const first = Math.trunc(numArg(s, ctx));
+      const last = Math.trunc(numArg(e, ctx));
+      const type = numArg(t, ctx);
+      if (rate <= 0 || periods <= 0 || present <= 0 || first < 1 || last < first || last > periods || (type !== 0 && type !== 1)) return Err.NUM;
+      const pmt = payment(rate, periods, present, 0, type);
+      let total = 0;
+      for (let per = first; per <= last; per++) {
+        const interest = interestPart(rate, per, pmt, present, type);
+        total += name === 'CUMIPMT' ? interest : pmt - interest;
+      }
+      return checkNumber(total);
+    }, { minArgs: 6, maxArgs: 6 });
+}
+
+/** Declining balance depreciation (DB) with the rate rounded to three decimals like Excel. */
+function decliningBalance(cost: number, salvage: number, life: number, period: number, month: number): number | CellError {
+  if (cost < 0 || salvage < 0 || life <= 0 || month < 1 || month > 12 || period < 1 || period > (month === 12 ? life : life + 1)) return Err.NUM;
+  if (cost === 0) return 0;
+  const rate = Math.round((1 - Math.pow(salvage / cost, 1 / life)) * 1000) / 1000;
+  let total = (cost * rate * month) / 12;
+  if (period === 1) return total;
+  for (let p = 2; p < period; p++) total += (cost - total) * rate;
+  return period === life + 1 ? ((cost - total) * rate * (12 - month)) / 12 : (cost - total) * rate;
+}
+
+/** Double (or factor) declining balance depreciation (DDB). */
+function doubleDeclining(cost: number, salvage: number, life: number, period: number, factor: number): number | CellError {
+  if (cost < 0 || salvage < 0 || life <= 0 || period <= 0 || period > life || factor <= 0) return Err.NUM;
+  let rate = factor / life;
+  let before: number;
+  if (rate >= 1) {
+    rate = 1;
+    before = period === 1 ? cost : 0;
+  } else before = cost * Math.pow(1 - rate, period - 1);
+  const depreciation = before * rate;
+  // Never depreciate below the salvage value.
+  return before - depreciation < salvage ? Math.max(before - salvage, 0) : depreciation;
 }
 
 /**
@@ -186,4 +236,50 @@ export const financialFunctions: FunctionDef[] = [
   }, { minArgs: 2 }),
   periodPayment('IPMT'),
   periodPayment('PPMT'),
+  cumulative('CUMIPMT'),
+  cumulative('CUMPRINC'),
+  def('XNPV', 'financial', 'XNPV(rate, values, dates)', 'Net present value of cash flows on specific dates.', ([r, v, d], ctx) => {
+    const rate = numArg(r, ctx);
+    const values = toMatrix(v!, ctx).flat();
+    const dates = toMatrix(d!, ctx).flat();
+    if (values.length !== dates.length || !values.length) return Err.NUM;
+    let total = 0;
+    for (let i = 0; i < values.length; i++) {
+      const x = values[i]!;
+      const t = dates[i]!;
+      if (isError(x)) return x;
+      if (isError(t)) return t;
+      if (typeof x !== 'number' || typeof t !== 'number') return Err.VALUE;
+      const days = Math.trunc(t) - Math.trunc(dates[0] as number);
+      if (days < 0) return Err.NUM;
+      total += x / Math.pow(1 + rate, days / 365);
+    }
+    return checkNumber(total);
+  }, { minArgs: 3, maxArgs: 3 }),
+  def('SLN', 'financial', 'SLN(cost, salvage, life)', 'Straight-line depreciation for one period.', ([c, s, l], ctx) => {
+    const life = numArg(l, ctx);
+    return life === 0 ? Err.DIV0 : (numArg(c, ctx) - numArg(s, ctx)) / life;
+  }, { minArgs: 3, maxArgs: 3 }),
+  def('SYD', 'financial', 'SYD(cost, salvage, life, per)', "Sum-of-years' digits depreciation for a period.", ([c, s, l, p], ctx) => {
+    const life = numArg(l, ctx);
+    const per = numArg(p, ctx);
+    if (life <= 0 || per <= 0 || per > life) return Err.NUM;
+    return ((numArg(c, ctx) - numArg(s, ctx)) * (life - per + 1) * 2) / (life * (life + 1));
+  }, { minArgs: 4, maxArgs: 4 }),
+  def('DB', 'financial', 'DB(cost, salvage, life, period, [month])', 'Fixed declining balance depreciation for a period.', ([c, s, l, p, m], ctx) =>
+    decliningBalance(numArg(c, ctx), numArg(s, ctx), Math.trunc(numArg(l, ctx)), Math.trunc(numArg(p, ctx)), Math.trunc(numArg(m, ctx, 12))),
+  { minArgs: 4, maxArgs: 5 }),
+  def('DDB', 'financial', 'DDB(cost, salvage, life, period, [factor])', 'Double declining balance depreciation for a period.', ([c, s, l, p, f], ctx) =>
+    doubleDeclining(numArg(c, ctx), numArg(s, ctx), numArg(l, ctx), numArg(p, ctx), numArg(f, ctx, 2)),
+  { minArgs: 4, maxArgs: 5 }),
+  def('EFFECT', 'financial', 'EFFECT(nominal_rate, npery)', 'Effective annual interest rate.', ([r, n], ctx) => {
+    const rate = numArg(r, ctx);
+    const periods = Math.trunc(numArg(n, ctx));
+    return rate <= 0 || periods < 1 ? Err.NUM : checkNumber(Math.pow(1 + rate / periods, periods) - 1);
+  }, { minArgs: 2, maxArgs: 2 }),
+  def('NOMINAL', 'financial', 'NOMINAL(effect_rate, npery)', 'Nominal annual interest rate.', ([r, n], ctx) => {
+    const rate = numArg(r, ctx);
+    const periods = Math.trunc(numArg(n, ctx));
+    return rate <= 0 || periods < 1 ? Err.NUM : checkNumber(periods * (Math.pow(1 + rate, 1 / periods) - 1));
+  }, { minArgs: 2, maxArgs: 2 }),
 ];

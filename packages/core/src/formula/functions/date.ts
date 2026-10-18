@@ -1,9 +1,9 @@
 import { dateToSerial, jsDateToSerial, serialToParts, timeToSerial } from '../../dates.js';
 import { parseInput } from '../../numfmt.js';
-import { Err } from '../../values.js';
-import { toMatrix } from '../evaluator.js';
+import { Err, isError } from '../../values.js';
+import { toMatrix, type EvalValue, type FunctionContext } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
-import { def, numArg, scalarArg, textArg, unary } from './helpers.js';
+import { bail, boolArg, def, numArg, scalarArg, textArg, unary } from './helpers.js';
 
 function dateArg(v: Parameters<typeof scalarArg>[0], ctx: Parameters<typeof scalarArg>[1]): number {
   const s = scalarArg(v, ctx);
@@ -23,9 +23,122 @@ function addMonths(serial: number, months: number): { y: number; m: number; d: n
   return { y, m, d: Math.min(p.day, lastDay) };
 }
 
-function isWorkday(serial: number, holidays: Set<number>): boolean {
-  const wd = serialToParts(serial).weekday;
-  return wd !== 0 && wd !== 6 && !holidays.has(serial);
+// Weekend days indexed by weekday (0 = Sunday).
+const SAT_SUN = [true, false, false, false, false, false, true];
+
+function isWorkday(serial: number, holidays: Set<number>, weekend: boolean[] = SAT_SUN): boolean {
+  return !weekend[serialToParts(serial).weekday] && !holidays.has(serial);
+}
+
+function holidaySet(arg: EvalValue | undefined, ctx: FunctionContext): Set<number> {
+  const holidays = new Set<number>();
+  if (arg !== undefined && arg !== null) for (const v of toMatrix(arg, ctx).flat()) {
+    if (isError(v)) bail(v);
+    // Dates given as text, e.g. {"2006/1/2"}, count like in Excel.
+    const serial = typeof v === 'string' ? parseInput(v).value : v;
+    if (typeof v === 'string' && typeof serial !== 'number') bail(Err.VALUE);
+    if (typeof serial === 'number') holidays.add(Math.trunc(serial));
+  }
+  return holidays;
+}
+
+/**
+ * The weekend of NETWORKDAYS.INTL and WORKDAY.INTL: 1-7 for two days (1 = Saturday
+ * and Sunday, 2 = Sunday and Monday, ...), 11-17 for one day (11 = Sunday, ...) or
+ * a mask of seven 0/1 characters starting on Monday.
+ */
+function weekendArg(arg: EvalValue | undefined, ctx: FunctionContext): boolean[] {
+  const v = scalarArg(arg, ctx);
+  if (v === null) return SAT_SUN;
+  if (isError(v)) bail(v);
+  if (typeof v === 'string') {
+    if (!/^[01]{7}$/.test(v)) bail(Err.VALUE);
+    return [v[6] === '1', ...[...v.slice(0, 6)].map((c) => c === '1')];
+  }
+  const code = Math.trunc(numArg(arg, ctx));
+  const days = new Array<boolean>(7).fill(false);
+  if (code >= 1 && code <= 7) {
+    days[(code + 5) % 7] = true;
+    days[(code + 6) % 7] = true;
+  } else if (code >= 11 && code <= 17) days[code - 11] = true;
+  else bail(Err.NUM);
+  return days;
+}
+
+function networkDays(start: number, end: number, holidays: Set<number>, weekend?: boolean[]): number {
+  const sign = start <= end ? 1 : -1;
+  if (sign < 0) [start, end] = [end, start];
+  let n = 0;
+  for (let d = start; d <= end; d++) if (isWorkday(d, holidays, weekend)) n++;
+  return n * sign;
+}
+
+function workday(start: number, days: number, holidays: Set<number>, weekend?: boolean[]): number {
+  let d = start;
+  const step = days >= 0 ? 1 : -1;
+  while (days !== 0) {
+    d += step;
+    if (isWorkday(d, holidays, weekend)) days -= step;
+  }
+  return d;
+}
+
+const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+const lastDay = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+/** DAYS360: the US (NASD) method or, with european = TRUE, the European method. */
+function days360(start: number, end: number, european: boolean): number {
+  const a = serialToParts(start), b = serialToParts(end);
+  let d1 = a.day, d2 = b.day, m2 = b.month, y2 = b.year;
+  if (european) {
+    if (d1 === 31) d1 = 30;
+    if (d2 === 31) d2 = 30;
+  } else {
+    if (d1 === lastDay(a.year, a.month)) d1 = 30;
+    if (d2 === 31) {
+      if (d1 < 30) {
+        d2 = 1;
+        if (++m2 > 12) { m2 = 1; y2++; }
+      } else d2 = 30;
+    }
+  }
+  return (y2 - a.year) * 360 + (m2 - a.month) * 30 + (d2 - d1);
+}
+
+/** YEARFRAC with the day count bases 0 (US 30/360), 1 (actual/actual), 2 (actual/360), 3 (actual/365), 4 (European 30/360). */
+function yearFrac(start: number, end: number, basis: number): number {
+  if (start > end) [start, end] = [end, start];
+  const a = serialToParts(start), b = serialToParts(end);
+  let d1 = a.day, d2 = b.day;
+  const thirty = () => (d2 + b.month * 30 + b.year * 360 - (d1 + a.month * 30 + a.year * 360)) / 360;
+  switch (basis) {
+    case 0: {
+      const lastOfFeb = (p: typeof a) => p.month === 2 && p.day === lastDay(p.year, 2);
+      if (d1 === 31 && d2 === 31) { d1 = 30; d2 = 30; }
+      else if (d1 === 31) d1 = 30;
+      else if (d1 === 30 && d2 === 31) d2 = 30;
+      else if (lastOfFeb(a) && lastOfFeb(b)) { d1 = 30; d2 = 30; }
+      else if (lastOfFeb(a)) d1 = 30;
+      return thirty();
+    }
+    case 1: {
+      const days = end - start;
+      if (a.year === b.year || (b.year === a.year + 1 && (a.month > b.month || (a.month === b.month && a.day >= b.day)))) {
+        // Up to one year: 366 days if the span contains a 29 February.
+        const feb29 = (y: number) => isLeap(y) && start <= dateToSerial(y, 2, 29) && dateToSerial(y, 2, 29) <= end;
+        const leap = a.year === b.year ? isLeap(a.year) : feb29(a.year) || feb29(b.year);
+        return days / (leap ? 366 : 365);
+      }
+      // Longer spans: the average length of the calendar years touched.
+      return days / ((dateToSerial(b.year + 1, 1, 1) - dateToSerial(a.year, 1, 1)) / (b.year - a.year + 1));
+    }
+    case 2: return (end - start) / 360;
+    case 3: return (end - start) / 365;
+    default:
+      if (d1 === 31) d1 = 30;
+      if (d2 === 31) d2 = 30;
+      return thirty();
+  }
 }
 
 export const dateFunctions: FunctionDef[] = [
@@ -112,27 +225,23 @@ export const dateFunctions: FunctionDef[] = [
       default: return Err.NUM;
     }
   }, { minArgs: 3, maxArgs: 3 }),
-  def('NETWORKDAYS', 'date', 'NETWORKDAYS(start_date, end_date, [holidays])', 'Working days between two dates.', ([s, e, h], ctx) => {
-    let start = Math.trunc(dateArg(s, ctx));
-    let end = Math.trunc(dateArg(e, ctx));
-    const sign = start <= end ? 1 : -1;
-    if (sign < 0) [start, end] = [end, start];
-    const holidays = new Set<number>();
-    if (h) for (const v of toMatrix(h, ctx).flat()) if (typeof v === 'number') holidays.add(Math.trunc(v));
-    let n = 0;
-    for (let d = start; d <= end; d++) if (isWorkday(d, holidays)) n++;
-    return n * sign;
-  }, { minArgs: 2, maxArgs: 3 }),
-  def('WORKDAY', 'date', 'WORKDAY(start_date, days, [holidays])', 'Date after a number of working days.', ([s, n, h], ctx) => {
-    let d = Math.trunc(dateArg(s, ctx));
-    let days = Math.trunc(numArg(n, ctx));
-    const holidays = new Set<number>();
-    if (h) for (const v of toMatrix(h, ctx).flat()) if (typeof v === 'number') holidays.add(Math.trunc(v));
-    const step = days >= 0 ? 1 : -1;
-    while (days !== 0) {
-      d += step;
-      if (isWorkday(d, holidays)) days -= step;
-    }
-    return d;
+  def('NETWORKDAYS', 'date', 'NETWORKDAYS(start_date, end_date, [holidays])', 'Working days between two dates.', ([s, e, h], ctx) =>
+    networkDays(Math.trunc(dateArg(s, ctx)), Math.trunc(dateArg(e, ctx)), holidaySet(h, ctx)), { minArgs: 2, maxArgs: 3 }),
+  def('NETWORKDAYS.INTL', 'date', 'NETWORKDAYS.INTL(start_date, end_date, [weekend], [holidays])', 'Working days between two dates with a custom weekend.', ([s, e, w, h], ctx) =>
+    networkDays(Math.trunc(dateArg(s, ctx)), Math.trunc(dateArg(e, ctx)), holidaySet(h, ctx), weekendArg(w, ctx)), { minArgs: 2, maxArgs: 4 }),
+  def('WORKDAY', 'date', 'WORKDAY(start_date, days, [holidays])', 'Date after a number of working days.', ([s, n, h], ctx) =>
+    workday(Math.trunc(dateArg(s, ctx)), Math.trunc(numArg(n, ctx)), holidaySet(h, ctx)), { minArgs: 2, maxArgs: 3 }),
+  def('WORKDAY.INTL', 'date', 'WORKDAY.INTL(start_date, days, [weekend], [holidays])', 'Date after a number of working days with a custom weekend.', ([s, n, w, h], ctx) => {
+    const weekend = weekendArg(w, ctx);
+    if (weekend.every(Boolean)) return Err.VALUE;
+    return workday(Math.trunc(dateArg(s, ctx)), Math.trunc(numArg(n, ctx)), holidaySet(h, ctx), weekend);
+  }, { minArgs: 2, maxArgs: 4 }),
+  def('DAYS360', 'date', 'DAYS360(start_date, end_date, [method])', 'Days between two dates in a 360-day year (method TRUE: European).', ([s, e, m], ctx) =>
+    days360(Math.trunc(dateArg(s, ctx)), Math.trunc(dateArg(e, ctx)), boolArg(m, ctx, false)), { minArgs: 2, maxArgs: 3 }),
+  def('YEARFRAC', 'date', 'YEARFRAC(start_date, end_date, [basis])', 'Fraction of a year between two dates (basis 0-4).', ([s, e, b], ctx) => {
+    const basis = Math.trunc(numArg(b, ctx, 0));
+    const start = Math.trunc(dateArg(s, ctx)), end = Math.trunc(dateArg(e, ctx));
+    if (basis < 0 || basis > 4 || start < 0 || end < 0) return Err.NUM;
+    return yearFrac(start, end, basis);
   }, { minArgs: 2, maxArgs: 3 }),
 ];

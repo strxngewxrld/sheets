@@ -69,7 +69,7 @@ describe('SpreadsheetAgent', () => {
     const result = agent.execute('list_functions', { category: 'financial' });
     expect(result.ok).toBe(true);
     const functions = (result.result as { functions: { name: string }[] }).functions;
-    expect(functions.map((f) => f.name)).toEqual(['FV', 'IPMT', 'IRR', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV', 'RATE', 'XIRR']);
+    expect(functions.map((f) => f.name)).toEqual(['CUMIPMT', 'CUMPRINC', 'DB', 'DDB', 'EFFECT', 'FV', 'IPMT', 'IRR', 'NOMINAL', 'NPER', 'NPV', 'PMT', 'PPMT', 'PV', 'RATE', 'SLN', 'SYD', 'XIRR', 'XNPV']);
     const schema = agent.tools.find((tool) => tool.name === 'list_functions')!.inputSchema;
     expect(JSON.stringify(schema)).toContain('financial');
     expect(agent.execute('write_range', { start: 'A1', values: [['=PMT(0,12,1200)']] }).ok).toBe(true);

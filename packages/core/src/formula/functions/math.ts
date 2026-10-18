@@ -13,7 +13,7 @@ import {
   unary,
 } from './helpers.js';
 
-const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+export const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
 // Rounding to multiples works on 15 significant digits like Excel: in binary floating
 // point 0.3 / 0.1 is 2.9999999999999996 (FLOOR would give 0.2) and 3 * 0.1 is 0.30000000000000004.
@@ -38,16 +38,16 @@ function toMultiple(name: string, description: string, round: (q: number) => num
     { minArgs: 1, maxArgs: 3 },
   );
 }
-const mean = (xs: number[]) => (xs.length ? sum(xs) / xs.length : bail(Err.DIV0));
+export const mean = (xs: number[]) => (xs.length ? sum(xs) / xs.length : bail(Err.DIV0));
 
-function variance(xs: number[], sample: boolean): number {
+export function variance(xs: number[], sample: boolean): number {
   const n = xs.length;
   if (n < (sample ? 2 : 1)) bail(Err.DIV0);
   const m = sum(xs) / n;
   return xs.reduce((a, x) => a + (x - m) ** 2, 0) / (sample ? n - 1 : n);
 }
 
-function percentileInc(xs: number[], k: number): number {
+export function percentileInc(xs: number[], k: number): number {
   if (!xs.length || k < 0 || k > 1) bail(Err.NUM);
   const s = [...xs].sort((a, b) => a - b);
   const pos = (s.length - 1) * k;
@@ -56,7 +56,7 @@ function percentileInc(xs: number[], k: number): number {
   return s[lo]! + (s[hi]! - s[lo]!) * (pos - lo);
 }
 
-function percentileExc(xs: number[], k: number): number {
+export function percentileExc(xs: number[], k: number): number {
   const n = xs.length;
   if (!n || k <= 0 || k >= 1) bail(Err.NUM);
   const pos = k * (n + 1) - 1;
@@ -67,7 +67,7 @@ function percentileExc(xs: number[], k: number): number {
   return s[lo]! + (s[hi]! - s[lo]!) * (pos - lo);
 }
 
-function modeOf(xs: number[]): number | CellError {
+export function modeOf(xs: number[]): number | CellError {
   const counts = new Map<number, number>();
   let best: number | null = null;
   let bestCount = 1;
