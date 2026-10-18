@@ -10,7 +10,20 @@ const bridge = vi.hoisted(() => ({
   options: undefined as undefined | { onOpenLink?: (url: string) => void },
   notices: [] as (string | null)[],
   receive: undefined as ((event: { data: HostToWebview }) => void) | undefined,
+  app: undefined as FakeElement | undefined,
 }));
+
+/** Just enough DOM for the status panel of the webview shell. */
+class FakeElement {
+  children: FakeElement[] = [];
+  className = '';
+  textContent = '';
+  attributes: Record<string, string> = {};
+  setAttribute(name: string, value: string) { this.attributes[name] = value; }
+  append(...nodes: FakeElement[]) { this.children.push(...nodes); }
+  replaceChildren(...nodes: FakeElement[]) { this.children = nodes; }
+  text(): string { return [this.textContent, ...this.children.map((c) => c.text())].filter(Boolean).join(' '); }
+}
 
 // Keep the real webview message handler, workbook, I/O and agent. Only the
 // canvas/DOM view is replaced so this regression runs without VS Code itself.
@@ -22,6 +35,7 @@ vi.mock('@sheets/ui', () => ({
     focus() {}
     runCommand(command: string) { bridge.commands.push(command); }
     setNotice(text: string | null) { bridge.notices.push(text); }
+    destroy() {}
   },
 }));
 
@@ -43,7 +57,8 @@ beforeEach(async () => {
   bridge.notices.length = 0;
   bridge.receive = undefined;
   vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage: bridge.post }));
-  vi.stubGlobal('document', { getElementById: () => ({}) });
+  bridge.app = new FakeElement();
+  vi.stubGlobal('document', { getElementById: () => bridge.app, createElement: () => new FakeElement() });
   vi.stubGlobal('window', { addEventListener: (_name: string, listener: typeof bridge.receive) => { bridge.receive = listener; } });
   await import('../src/webview/main.js');
 });
@@ -172,5 +187,74 @@ describe('VS Code webview file lifecycle', () => {
     expect(bridge.post.mock.calls.some(([m]) => m.type === 'initialized')).toBe(false);
     send({ type: 'request', id: 1, method: 'getFileData' });
     expect(response(1).error).toBe('Workbook not loaded');
+  });
+});
+
+describe('VS Code webview loading errors and CSV saves', () => {
+  const csv = (text: string, fileName = 'data.csv', language = 'de') => send({ type: 'init', bytes: encodeBytes(new TextEncoder().encode(text)), fileName, language, readOnly: false });
+  const fileData = (id: number, fileName?: string) => {
+    send({ type: 'request', id, method: 'getFileData', ...(fileName ? { params: { fileName } } : {}) });
+    return response(id);
+  };
+
+  it('shows a localized error in the editor area when a file cannot be opened', () => {
+    send({ type: 'init', bytes: encodeBytes(new TextEncoder().encode('not an xlsx')), fileName: 'kaputt.xlsx', language: 'de', readOnly: false });
+    const panel = bridge.app!.children[0]!;
+    expect(panel.attributes.role).toBe('alert');
+    expect(panel.text()).toContain('kaputt.xlsx konnte nicht geöffnet werden.');
+    expect(panel.text()).toContain('Speichern ist in diesem Editor deaktiviert');
+    expect(fileData(1).error).toBe('Workbook not loaded');
+    send({ type: 'init', bytes: encodeBytes(new TextEncoder().encode('not an xlsx')), fileName: 'broken.xlsx', language: 'en', readOnly: false });
+    expect(bridge.app!.children[0]!.text()).toContain('broken.xlsx could not be opened.');
+  });
+
+  it('reproduces CRLF, a missing final line break and the BOM of the opened CSV', () => {
+    for (const text of ['\uFEFFName;Wert\r\nMüller;1,5', 'a,b\n1,2\n', 'a,b\r\n0004711,2\r\n']) {
+      csv(text);
+      const bytes = decodeBytes(fileData(1).result as string);
+      expect(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes)).toBe(text);
+      bridge.post.mockClear();
+    }
+  });
+
+  it('warns once, without blocking, when a CSV save drops content', () => {
+    csv('Name;Wert\r\nA;1\r\n');
+    expect(fileData(1).error).toBeUndefined();
+    expect(bridge.post.mock.calls.some(([m]) => m.type === 'warning')).toBe(false);
+    send({ type: 'request', id: 2, method: 'executeTool', params: { name: 'add_sheet', input: { name: 'Zweites' } } });
+    expect(response(2).result).toMatchObject({ ok: true });
+    expect(fileData(3).error).toBeUndefined();
+    const warnings = bridge.post.mock.calls.map(([m]) => m as WebviewToHost).filter((m) => m.type === 'warning');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ message: expect.stringMatching(/data\.csv wird als CSV gespeichert\. .*nur die Werte des aktiven Blatts „(Zweites|data)“/) });
+    expect(warnings[0]).toMatchObject({ message: expect.stringContaining('weitere Blätter') });
+    fileData(4);
+    expect(bridge.post.mock.calls.filter(([m]) => m.type === 'warning')).toHaveLength(1);
+  });
+
+  it('writes the format of the save target for "Save As"', () => {
+    csv('Name;Wert\r\nA;1,5\r\n');
+    const xlsx = decodeBytes(fileData(1, 'data.xlsx').result as string);
+    expect(openWorkbook(xlsx, 'data.xlsx').getValue(0, 1, 1)).toBe(1.5);
+    const tsv = new TextDecoder().decode(decodeBytes(fileData(2, 'data.tsv').result as string));
+    expect(tsv).toBe('Name\tWert\nA\t1.5\n');
+  });
+
+  it('shows protection reasons in the UI language', () => {
+    vi.useFakeTimers();
+    try {
+      const wb = new Workbook();
+      setValues(wb, 0, 0, 0, [['Name', 'Value'], ['A', 1]]);
+      const parts = unzipSync(saveWorkbook(wb, 'xlsx'));
+      parts['customXml/unimplemented.xml'] = strToU8('<preserve/>');
+      send({ type: 'init', bytes: encodeBytes(zipSync(parts)), fileName: 'complex.xlsx', language: 'en', readOnly: false });
+      send({ type: 'request', id: 1, method: 'executeTool', params: { name: 'format_table', input: { range: 'A1:B2' } } });
+      vi.advanceTimersByTime(1000);
+      expect(bridge.notices.at(-1)).toMatch(/^Structure, table, chart or rule change/);
+      send({ type: 'request', id: 2, method: 'getFileData' });
+      expect(response(2).error).toMatch(/^XLSX protection: /);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

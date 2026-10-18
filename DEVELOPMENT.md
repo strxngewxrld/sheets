@@ -43,11 +43,11 @@ Die GitHub-Actions-Matrix führt Typecheck, Tests und VSIX-Paketierung unter Ubu
 
 `npm run package` erstellt `artifacts/sheets-vscode-<version>.vsix`. Die Positivliste in `.vscodeignore` nimmt ausschließlich Manifest, Übersetzungen, Dokumentation, Lizenz, Icon, Vorschau und die beiden JavaScript-Bundles auf. TypeScript, Source Maps, node_modules, Testdateien und Beispieldateien bleiben draußen. Alle Laufzeitabhängigkeiten außer der VS-Code-API sind gebündelt.
 
-Die Extension-ID bleibt `sheets.sheets-vscode`. Das Repository im Manifest verweist auf `strxngewxrld/sheets`. Für eine Marketplace-Veröffentlichung ist weiterhin ein eigener/verifizierter Publisher und die Anmeldung für `vsce` nötig. Die CI erzeugt nur ein herunterladbares VSIX-Artefakt und veröffentlicht nichts.
+Die Extension-ID lautet `Tom-Knueppel.sheets-vscode` (Publisher `Tom-Knueppel` aus `package.json`); der Host-Test (`test/host/index.cjs`) sucht die Extension unter dieser ID. Das Repository im Manifest verweist auf `strxngewxrld/sheets`. Für eine Marketplace-Veröffentlichung ist weiterhin ein eigener/verifizierter Publisher und die Anmeldung für `vsce` nötig. Die CI erzeugt nur ein herunterladbares VSIX-Artefakt und veröffentlicht nichts.
 
 ### GitHub Releases
 
-`tools/publish-github.mjs` führt `npm test` und `npm run package` aus und lädt die geprüfte `artifacts/sheets-vscode-<version>.vsix` direkt als Asset eines Releases `v<version>` hoch. Es gibt keine npm-Hülle, keine npm-Veröffentlichung und keine `.npmrc`. Die Extension-ID bleibt unverändert.
+`tools/publish-github.mjs` führt `npm test` und `npm run package` aus und lädt die geprüfte `artifacts/sheets-vscode-<version>.vsix` direkt als Asset eines Releases `v<version>` hoch. Es gibt keine npm-Hülle, keine npm-Veröffentlichung und keine `.npmrc`. Die Extension-ID `Tom-Knueppel.sheets-vscode` bleibt unverändert.
 
 ```bash
 # Lokal prüfen: kein Token und keine GitHub CLI nötig, keine Versionsänderung

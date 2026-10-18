@@ -11,7 +11,7 @@ exports.run = async () => {
     fs.renameSync(file + '.tmp', file);
   };
   try {
-    const extension = vscode.extensions.getExtension('sheets.sheets-vscode');
+    const extension = vscode.extensions.getExtension('Tom-Knueppel.sheets-vscode');
     assert(extension, 'Sheets extension is missing');
     const api = await extension.activate();
     const expected = extension.packageJSON.contributes.languageModelTools;
@@ -58,6 +58,18 @@ exports.run = async () => {
     assert.match(saved, /33\.5/);
     assert.match(JSON.stringify(await api.executeTool('list_tables', {}, file)), /Migration/);
     checks.push('live editor saves XLSX and reopening retains values and native tables');
+
+    // A file that cannot be opened must never be overwritten, and saving must not wait for a timeout.
+    const corrupt = path.join(process.env.SHEETS_HOST_WORKDIR, 'corrupt.xlsx');
+    fs.writeFileSync(corrupt, 'this is not a zip archive');
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(corrupt));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const started = Date.now();
+    await vscode.commands.executeCommand('workbench.action.files.save').then(undefined, () => undefined);
+    assert(Date.now() - started < 20_000, 'Saving an unopenable file waited for a webview timeout');
+    assert.equal(fs.readFileSync(corrupt, 'utf8'), 'this is not a zip archive', 'An unopenable file was overwritten');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    checks.push('a file that cannot be opened is never overwritten by save');
     report({ status: 'passed', checks });
   } catch (error) {
     report({ status: 'failed', checks, error: error.stack ?? String(error) });

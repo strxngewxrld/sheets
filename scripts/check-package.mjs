@@ -18,6 +18,8 @@ export async function checkPackage(path) {
   assert.equal(pkg.main, './dist/extension.js');
   assert(files['extension/THIRD_PARTY_NOTICES.md'], 'Missing bundled dependency licenses');
   assert.equal(pkg.name, 'sheets-vscode');
+  // The extension ID (publisher.name) is used by the VS Code host test.
+  assert.equal(pkg.publisher, 'Tom-Knueppel');
   assert.equal(pkg.contributes.configurationDefaults['workbench.editorAssociations']['*.xlsx'], 'sheets.spreadsheet');
   assert.equal(pkg.contributes.customEditors.find((editor) => editor.viewType === 'sheets.spreadsheet').priority, 'default');
   const png = files[`extension/${pkg.icon}`];

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { decodeBytes, encodeBytes } from './binary.js';
 import type { HostToWebview, WebviewToHost } from './protocol.js';
+import { fill, shellStrings } from './webview/strings.js';
 
 /** A spreadsheet file opened in the custom editor. The live model lives in the webview. */
 export class SpreadsheetDocument implements vscode.CustomDocument {
@@ -9,6 +10,8 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
   /** Last observed on-disk version; null means an older backup cannot prove it. */
   diskBytes: Uint8Array | null | undefined;
   panel: vscode.WebviewPanel | null = null;
+  /** Set while the webview could not open the file; such a document must never be saved. */
+  loadError: string | undefined;
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private initialized = false;
@@ -27,10 +30,11 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
   }
 
   /** Sends a request to the webview and waits for the response. */
-  request<T>(method: 'getFileData' | 'getBackupData'): Promise<T>;
+  request<T>(method: 'getBackupData'): Promise<T>;
+  request<T>(method: 'getFileData', params?: { fileName: string }): Promise<T>;
   request<T>(method: 'executeTool', params: { name: string; input: unknown }): Promise<T>;
   request<T>(method: 'exportCsv', params: { delimiter: string }): Promise<T>;
-  request<T>(method: 'getFileData' | 'getBackupData' | 'executeTool' | 'exportCsv', params?: { name: string; input: unknown } | { delimiter: string }): Promise<T> {
+  request<T>(method: 'getFileData' | 'getBackupData' | 'executeTool' | 'exportCsv', params?: { name: string; input: unknown } | { delimiter: string } | { fileName: string }): Promise<T> {
     if (!this.panel) return Promise.reject(new Error('Spreadsheet editor is not open'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
@@ -41,7 +45,8 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       const message: HostToWebview = method === 'executeTool' ? { type: 'request', id, method, params: params as { name: string; input: unknown } }
         : method === 'exportCsv' ? { type: 'request', id, method, params: params as { delimiter: string } }
-          : { type: 'request', id, method };
+          : method === 'getFileData' ? { type: 'request', id, method, ...(params ? { params: params as { fileName: string } } : {}) }
+            : { type: 'request', id, method };
       if (this.initialized) this.post(message);
       else this.queued.set(id, message);
     });
@@ -129,7 +134,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     document.panel = panel;
     this.activeDocument = document;
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')] };
-    panel.webview.html = this.html(panel.webview);
+    panel.webview.html = this.html(panel.webview, document.uri.path.split('/').pop() ?? '');
     panel.onDidChangeViewState(() => {
       if (panel.active) this.activeDocument = document;
     });
@@ -139,6 +144,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     panel.webview.onDidReceiveMessage((msg: WebviewToHost) => {
       switch (msg.type) {
         case 'initialized':
+          document.loadError = undefined;
           document.markInitialized();
           break;
         case 'ready':
@@ -167,8 +173,12 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
           if (/^(https?:|mailto:)/i.test(msg.url)) void vscode.env.openExternal(vscode.Uri.parse(msg.url, true));
           break;
         case 'error':
+          document.loadError = msg.message;
           document.reset(msg.message);
           void vscode.window.showErrorMessage(`Sheets: ${msg.message}`);
+          break;
+        case 'warning':
+          void vscode.window.showWarningMessage(msg.message);
           break;
       }
     });
@@ -179,7 +189,9 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
   }
 
   async saveCustomDocumentAs(document: SpreadsheetDocument, destination: vscode.Uri): Promise<void> {
-    const bytes = await document.request<string>('getFileData');
+    // Refuse at once instead of waiting for a webview that has no workbook (and would time out).
+    if (document.loadError !== undefined) throw new Error(fill(shellStrings(vscode.env.language).saveRefusedNotOpened, document.uri.path.split('/').pop() ?? ''));
+    const bytes = await document.request<string>('getFileData', { fileName: destination.path.split('/').pop() ?? '' });
     const data = decodeBytes(bytes);
     if (destination.toString() === document.uri.toString()) {
       if (document.diskBytes === null) throw new Error('Sheets: Die Dateiversion dieser älteren Sicherung ist unbekannt. Bitte mit „Speichern unter“ in eine neue Datei speichern.');
@@ -209,6 +221,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
   }
 
   async backupCustomDocument(document: SpreadsheetDocument, context: vscode.CustomDocumentBackupContext): Promise<vscode.CustomDocumentBackup> {
+    if (document.loadError !== undefined) throw new Error(document.loadError);
     const snapshot = await document.request<string>('getBackupData');
     const data = JSON.parse(new TextDecoder().decode(decodeBytes(snapshot)));
     data.diskBytes = document.diskBytes === undefined || document.diskBytes === null ? null : encodeBytes(document.diskBytes);
@@ -219,7 +232,10 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     };
   }
 
-  private html(webview: vscode.Webview): string {
+  private html(webview: vscode.Webview, fileName: string): string {
+    // Shown until the webview has parsed the file, which takes a few seconds for large files.
+    const strings = shellStrings(vscode.env.language);
+    const escape = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'));
     const nonce = Array.from({ length: 32 }, () => Math.floor(Math.random() * 36).toString(36)).join('');
     return `<!DOCTYPE html>
@@ -228,10 +244,16 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; } #app { height: 100vh; }</style>
+<style>html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; } #app { height: 100vh; }
+.sheets-status { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; white-space: pre-line; font-family: var(--vscode-font-family, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--vscode-foreground, #333); background: var(--vscode-editor-background, #fff); }
+.sheets-status-loading strong::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sheets-spin 0.8s linear infinite; }
+.sheets-status-error strong { color: var(--vscode-errorForeground, #c00); }
+.sheets-status div { opacity: 0.8; max-width: 640px; }
+@keyframes sheets-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sheets-status-loading strong::before { animation: none; } }</style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><div class="sheets-status sheets-status-loading" role="status"><strong>${escape(fill(strings.loading, fileName))}</strong><div>${escape(strings.loadingDetail)}</div></div></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;

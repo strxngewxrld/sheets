@@ -19,7 +19,9 @@ export type HostToWebview =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'command'; command: ViewCommand }
-  | { type: 'request'; id: number; method: 'getFileData' | 'getBackupData' }
+  | { type: 'request'; id: number; method: 'getBackupData' }
+  /** `fileName` is the save target; its extension selects the written format ("Save As"). */
+  | { type: 'request'; id: number; method: 'getFileData'; params?: { fileName: string } }
   | { type: 'request'; id: number; method: 'executeTool'; params: { name: string; input: unknown } }
   | { type: 'request'; id: number; method: 'exportCsv'; params: { delimiter: string } };
 
@@ -36,4 +38,6 @@ export type WebviewToHost =
   | { type: 'edit'; label: string }
   | { type: 'openLink'; url: string }
   | { type: 'response'; id: number; result?: unknown; error?: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /** A non-blocking notice for the user, e.g. content a CSV save does not keep. */
+  | { type: 'warning'; message: string };
