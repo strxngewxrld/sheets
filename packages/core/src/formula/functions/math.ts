@@ -1,5 +1,5 @@
 import { Err, isError, type CellError, type Scalar } from '../../values.js';
-import { deref, isMatrix, isRef, toMatrix, toNumber, type EvalValue, type FunctionContext } from '../evaluator.js';
+import { broadcast, deref, isMatrix, isRef, toMatrix, toNumber, type EvalValue, type FunctionContext } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
 import {
   bail,
@@ -14,6 +14,30 @@ import {
 } from './helpers.js';
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+
+// Rounding to multiples works on 15 significant digits like Excel: in binary floating
+// point 0.3 / 0.1 is 2.9999999999999996 (FLOOR would give 0.2) and 3 * 0.1 is 0.30000000000000004.
+const ratio = (x: number, s: number) => Number((x / s).toPrecision(15));
+const times = (q: number, s: number) => Number((q * s).toPrecision(15));
+
+/** CEILING.MATH / FLOOR.MATH(number, [significance], [mode]): the sign of significance is ignored. */
+function toMultiple(name: string, description: string, round: (q: number) => number): FunctionDef {
+  return def(name, 'math', `${name}(number, [significance], [mode])`, description, ([a, b, c], ctx) =>
+    broadcast([deref(a!, ctx), b === undefined ? null : deref(b, ctx), c === undefined ? null : deref(c, ctx)], (x, y, z) => {
+      const n = toNumber(x);
+      if (isError(n)) return n;
+      const sig = y === null ? 1 : toNumber(y);
+      if (isError(sig)) return sig;
+      const mode = z === null ? 0 : toNumber(z);
+      if (isError(mode)) return mode;
+      const s = Math.abs(sig);
+      if (s === 0) return 0;
+      // With a mode, negative numbers are rounded as their absolute value and negated.
+      return n < 0 && mode !== 0 ? -times(round(ratio(-n, s)), s) : times(round(ratio(n, s)), s);
+    }),
+    { minArgs: 1, maxArgs: 3 },
+  );
+}
 const mean = (xs: number[]) => (xs.length ? sum(xs) / xs.length : bail(Err.DIV0));
 
 function variance(xs: number[], sample: boolean): number {
@@ -164,11 +188,12 @@ export const mathFunctions: FunctionDef[] = [
     const f = 10 ** Math.trunc(d);
     return Math.trunc(x * f) / f;
   }, { defaultY: 0 }),
-  binary('MROUND', 'MROUND(number, multiple)', 'Rounds to the nearest multiple.', (x, m) => (m === 0 ? 0 : x * m < 0 ? Err.NUM : roundHalfAway(x / m, 0) * m)),
-  binary('CEILING', 'CEILING(number, significance)', 'Rounds up to a multiple.', (x, s) => (s === 0 ? 0 : Math.ceil(x / s) * s), { defaultY: 1 }),
-  binary('CEILING.MATH', 'CEILING.MATH(number, [significance])', 'Rounds up to a multiple.', (x, s) => (s === 0 ? 0 : Math.ceil(x / Math.abs(s)) * Math.abs(s)), { defaultY: 1 }),
-  binary('FLOOR', 'FLOOR(number, significance)', 'Rounds down to a multiple.', (x, s) => (s === 0 ? Err.DIV0 : Math.floor(x / s) * s), { defaultY: 1 }),
-  binary('FLOOR.MATH', 'FLOOR.MATH(number, [significance])', 'Rounds down to a multiple.', (x, s) => (s === 0 ? 0 : Math.floor(x / Math.abs(s)) * Math.abs(s)), { defaultY: 1 }),
+  binary('MROUND', 'MROUND(number, multiple)', 'Rounds to the nearest multiple.', (x, m) => (m === 0 ? 0 : x * m < 0 ? Err.NUM : times(roundHalfAway(ratio(x, m), 0), m))),
+  // A positive number with a negative significance is #NUM! in Excel.
+  binary('CEILING', 'CEILING(number, significance)', 'Rounds up to a multiple.', (x, s) => (s === 0 ? 0 : x > 0 && s < 0 ? Err.NUM : times(Math.ceil(ratio(x, s)), s)), { defaultY: 1 }),
+  toMultiple('CEILING.MATH', 'Rounds up to a multiple; negative numbers away from zero when mode is not 0.', Math.ceil),
+  binary('FLOOR', 'FLOOR(number, significance)', 'Rounds down to a multiple.', (x, s) => (s === 0 ? Err.DIV0 : x > 0 && s < 0 ? Err.NUM : times(Math.floor(ratio(x, s)), s)), { defaultY: 1 }),
+  toMultiple('FLOOR.MATH', 'Rounds down to a multiple; negative numbers towards zero when mode is not 0.', Math.floor),
   binary('MOD', 'MOD(number, divisor)', 'Remainder after division (sign of divisor).', (x, y) => (y === 0 ? Err.DIV0 : x - y * Math.floor(x / y))),
   binary('POWER', 'POWER(number, power)', 'Raises a number to a power.', (x, y) => Math.pow(x, y)),
   binary('LOG', 'LOG(number, [base])', 'Logarithm to the given base.', (x, b) => (x <= 0 || b <= 0 || b === 1 ? Err.NUM : Math.log(x) / Math.log(b)), { defaultY: 10 }),
