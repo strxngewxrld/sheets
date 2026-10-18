@@ -1,6 +1,6 @@
 import { inputToCellData } from '../commands.js';
 import { formatAddress } from '../address.js';
-import type { Scalar } from '../values.js';
+import { scalarToJson, type Scalar } from '../values.js';
 import { formatValue, getDefaultLocale, LOCALE_DE, LOCALE_EN, type FormatLocale } from '../numfmt.js';
 import type { CellData, Sheet, SheetData } from '../sheet.js';
 import { Workbook } from '../workbook.js';
@@ -29,6 +29,12 @@ export interface CsvWriteOptions {
   /** Start with a UTF-8 byte order mark (default false). */
   bom?: boolean;
   locale?: FormatLocale;
+  /**
+   * Records of the file as it was read (see splitCsvRecords). A record whose fields
+   * still read as the row's current values is written back verbatim, so quoting,
+   * number spelling and short rows of unchanged lines stay as they were.
+   */
+  original?: (string | null)[];
 }
 
 /** Layout details of a CSV text that a save should reproduce. */
@@ -47,6 +53,8 @@ export interface CsvSource extends CsvLayout {
   encoding: CsvEncoding;
   /** The sheet holding the file's data; saved even when another sheet is active. */
   sheet: string;
+  /** The file's records as written (null for inserted rows), reused for rows that still hold the same values. */
+  rows?: (string | null)[];
 }
 
 /**
@@ -160,6 +168,48 @@ export function parseCsv(text: string, delimiter = ','): string[][] {
   return rows;
 }
 
+/**
+ * Splits CSV text into its records exactly as written (without line breaks; a BOM
+ * is skipped). Quotes are handled like parseCsv, so record i holds row i.
+ */
+export function splitCsvRecords(text: string, delimiter: string): string[] {
+  const records: string[] = [];
+  let start = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let inQuotes = false;
+  let fieldEmpty = true;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { i++; fieldEmpty = false; } else inQuotes = false;
+      } else fieldEmpty = false;
+      continue;
+    }
+    if (ch === '"' && fieldEmpty) inQuotes = true;
+    else if (ch === delimiter) fieldEmpty = true;
+    else if (ch === '\n' || ch === '\r') {
+      records.push(text.slice(start, i));
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      start = i + 1;
+      fieldEmpty = true;
+    } else fieldEmpty = false;
+  }
+  if (start < text.length) records.push(text.slice(start));
+  return records;
+}
+
+/** Converts one field like the reader does; also used to verify original records on save. */
+function fieldToCellData(raw: string, options: CsvReadOptions, locale: FormatLocale): CellData | null {
+  if (raw === '') return null;
+  if (options.inferTypes === false) return { v: raw };
+  if (raw.startsWith('=') && !options.formulas) return { v: raw };
+  const data = inputToCellData(raw, undefined, locale);
+  // Keep an inferred type only if it loses nothing, otherwise a plain open + save
+  // would rewrite the file (0004711 -> 4711, 2024-01-05 -> 45296, 5% -> 0.05).
+  if (data && data.f === undefined && data.v !== undefined && !isLossless(raw, data, locale)) return { v: raw };
+  return data;
+}
+
 export function csvToSheetData(text: string, options: CsvReadOptions = {}): SheetData {
   const delimiter = options.delimiter ?? detectDelimiter(text);
   const locale = options.locale ?? (delimiter === ';' ? LOCALE_DE : LOCALE_EN);
@@ -167,16 +217,7 @@ export function csvToSheetData(text: string, options: CsvReadOptions = {}): Shee
   const cells: Record<string, CellData> = {};
   rows.forEach((line, r) =>
     line.forEach((raw, c) => {
-      if (raw === '') return;
-      let data: CellData | null;
-      if (options.inferTypes === false) data = { v: raw };
-      else if (raw.startsWith('=') && !options.formulas) data = { v: raw };
-      else {
-        data = inputToCellData(raw, undefined, locale);
-        // Keep an inferred type only if it loses nothing, otherwise a plain open + save
-        // would rewrite the file (0004711 -> 4711, 2024-01-05 -> 45296, 5% -> 0.05).
-        if (data && data.f === undefined && data.v !== undefined && !isLossless(raw, data, locale)) data = { v: raw };
-      }
+      const data = fieldToCellData(raw, options, locale);
       if (data) cells[formatAddress(r, c)] = data;
     }),
   );
@@ -255,11 +296,29 @@ export function writeCsv(wb: Workbook, sheet: string | number = wb.activeSheetIn
   const eol = options.lineEnding ?? '\r\n';
   const locale = options.locale ?? (d === ';' ? LOCALE_DE : getDefaultLocale());
   const used = s.usedRange();
-  if (!used) return options.bom ? '\uFEFF' : '';
+  const width = used ? used.end.col + 1 : 0;
+  // An original record is reused only if it reads back as exactly the row's current values.
+  const original = options.formatted || options.formulas ? undefined : options.original;
+  const verbatim = (r: number): string | undefined => {
+    const record = original?.[r];
+    if (record === undefined || record === null) return undefined;
+    const fields = parseCsv(record, d)[0] ?? [];
+    for (let c = 0; c < Math.max(fields.length, width); c++) {
+      const expected = fields[c] === undefined ? null : fieldToCellData(fields[c]!, {}, locale)?.v ?? null;
+      if (JSON.stringify(expected) !== JSON.stringify(scalarToJson(s.getValue(r, c)))) return undefined;
+    }
+    return record;
+  };
+  let lastRow = used ? used.end.row : -1;
+  // Empty records after the data (blank lines) are kept while they are still empty.
+  while (original && lastRow + 1 < original.length && verbatim(lastRow + 1) !== undefined) lastRow++;
+  if (lastRow < 0) return options.bom ? '\uFEFF' : '';
   const lines: string[] = [];
-  for (let r = 0; r <= used.end.row; r++) {
+  for (let r = 0; r <= lastRow; r++) {
+    const kept = verbatim(r);
+    if (kept !== undefined) { lines.push(kept); continue; }
     const fields: string[] = [];
-    for (let c = 0; c <= used.end.col; c++) {
+    for (let c = 0; c < width; c++) {
       const cell = s.getCell(r, c);
       let text = '';
       if (cell) {

@@ -1,7 +1,7 @@
 import { strFromU8, strToU8 } from 'fflate';
 import { Workbook } from '../workbook.js';
 import { LOCALE_DE, LOCALE_EN } from '../numfmt.js';
-import { csvDataSheet, decodeCsvBytes, detectCsvLayout, detectDelimiter, encodeCsvText, readCsv, writeCsv, type CsvEncoding, type CsvReadOptions, type CsvWriteOptions } from './csv.js';
+import { csvDataSheet, decodeCsvBytes, detectCsvLayout, detectDelimiter, encodeCsvText, readCsv, splitCsvRecords, writeCsv, type CsvEncoding, type CsvReadOptions, type CsvWriteOptions } from './csv.js';
 import { readXlsx, type XlsxReadOptions } from './xlsx-read.js';
 import { writeXlsx, type XlsxWriteOptions } from './xlsx-write.js';
 
@@ -38,7 +38,7 @@ export function openWorkbook(bytes: Uint8Array | ArrayBuffer, fileName: string, 
       const delimiter = options.csv?.delimiter ?? (format === 'tsv' ? '\t' : detectDelimiter(text));
       const wb = readCsv(text, { sheetName: baseName, ...options.csv, delimiter });
       // Remembered so a save writes the file back the way it was (also through JSON and undo).
-      wb.csvSource = { ...detectCsvLayout(text), delimiter, encoding, sheet: wb.sheets[0]!.name };
+      wb.csvSource = { ...detectCsvLayout(text), delimiter, encoding, sheet: wb.sheets[0]!.name, rows: splitCsvRecords(text, delimiter) };
       return wb;
     }
     case 'json':
@@ -78,8 +78,11 @@ function saveCsv(wb: Workbook, format: 'csv' | 'tsv', options: NonNullable<SaveO
   const source = wb.csvSource;
   const { encoding: requested, sheet: requestedSheet, ...write } = options;
   const delimiter = write.delimiter ?? (format === 'tsv' ? '\t' : source && source.delimiter !== '\t' ? source.delimiter : ',');
-  const text = writeCsv(wb, requestedSheet ?? csvDataSheet(wb).name, {
-    ...(source ? { lineEnding: source.lineEnding, finalNewline: source.finalNewline, bom: source.bom, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN } : {}),
+  const sheet = requestedSheet ?? csvDataSheet(wb).name;
+  // Unchanged records of the opened file are written back as they were (same sheet and delimiter only).
+  const original = source && delimiter === source.delimiter && wb.getSheet(sheet) === csvDataSheet(wb) ? source.rows : undefined;
+  const text = writeCsv(wb, sheet, {
+    ...(source ? { lineEnding: source.lineEnding, finalNewline: source.finalNewline, bom: source.bom, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN, original } : {}),
     ...Object.fromEntries(Object.entries(write).filter(([, value]) => value !== undefined)),
     delimiter,
   });

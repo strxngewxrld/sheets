@@ -173,8 +173,7 @@ export class Workbook {
       for (const op of list) {
         const inverse = this.applyOp(op, tx);
         if (this.xlsxSource) this.trackXlsxEdit(op, options.origin === 'undo');
-        // The CSV data sheet follows renames (undo applies the inverse rename).
-        if (this.csvSource && op.type === 'renameSheet' && op.from === this.csvSource.sheet) this.csvSource = { ...this.csvSource, sheet: op.to };
+        if (this.csvSource) this.trackCsvSource(op);
         tx.ops.push(op);
         tx.inverse.unshift(...inverse);
       }
@@ -212,6 +211,23 @@ export class Workbook {
     if (op.type === 'addSheet' || (op.type === 'removeSheet' && undo)) return;
     if (['insertRows', 'deleteRows', 'insertCols', 'deleteCols', 'removeSheet', 'renameSheet', 'moveSheet'].includes(op.type) || (op.type === 'setCells' && op.reordersCells)) {
       source.structuralEdits = Math.max(0, (source.structuralEdits ?? 0) + delta);
+    }
+  }
+
+  /**
+   * Keeps the CSV source in step with the data sheet: it follows renames, and the
+   * original records move with inserted and deleted rows. Undo applies the inverse
+   * operation or restores a snapshot that includes the source.
+   */
+  private trackCsvSource(op: Operation): void {
+    const source = this.csvSource!;
+    if (op.type === 'renameSheet' && op.from === source.sheet) this.csvSource = { ...source, sheet: op.to };
+    else if ((op.type === 'insertRows' || op.type === 'deleteRows') && op.sheet === source.sheet && source.rows) {
+      // Copied, not mutated: snapshots share the array.
+      const rows: (string | null)[] = [...source.rows];
+      if (op.type === 'insertRows') rows.splice(op.index, 0, ...new Array<null>(op.count).fill(null));
+      else rows.splice(op.index, op.count);
+      this.csvSource = { ...source, rows };
     }
   }
 
@@ -427,6 +443,7 @@ export class Workbook {
       case 'restore': {
         const snapshot = this.toJSON();
         const active = this.activeSheetIndex;
+        if (op.data.csvSource) this.csvSource = { ...op.data.csvSource };
         this.sheets = op.data.sheets.map((s) => Sheet.fromJSON(s));
         this.pivotTables = structuredClone(op.data.pivotTables ?? []);
         this.names.clear();

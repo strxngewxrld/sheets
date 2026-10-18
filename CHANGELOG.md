@@ -8,6 +8,7 @@
 - CSV: opening and saving keeps the file content: line endings, a missing final line break and a UTF-8 BOM are kept; leading zeros, dates, percentages, foreign decimal separators and long numbers stay text.
 - CSV: Windows-1252 files (CSV exports of Excel on German/Western European Windows) are read and saved in their encoding instead of turning umlauts into replacement characters; text Windows-1252 cannot hold is saved as UTF-8 with BOM, with a one-time notice.
 - CSV: agent tools for unopened files and the MCP server keep the delimiter, decimal comma, line endings, BOM and encoding of a CSV file. Before, any agent edit rewrote a semicolon CSV with commas and decimal points.
+- CSV: unedited rows are written back verbatim (quoting, number spelling such as `12,50`, short rows), so a save changes only the lines that were edited. A record is reused only when it reads back as exactly the current values.
 - CSV: a save always writes the file's data sheet, even when another sheet is active.
 - XLSX: formula results stored in the file follow edits. Unchanged formulas whose result changes (also on other sheets) get the new cached value, new formulas get their computed value; only formulas with functions the engine knows, never an invented result. Programs that read cached values without calculating no longer see stale results.
 - XLSX: an edit that only changes formula results on a protected sheet no longer blocks saving.

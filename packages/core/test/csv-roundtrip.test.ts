@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectCsvLayout, openWorkbook, saveWorkbook } from '../src/index.js';
+import { detectCsvLayout, openWorkbook, saveWorkbook, setCellInput } from '../src/index.js';
 
 // Opening and saving a CSV without editing must not change what the file says.
 const RAW = ['0004711', '007', '1e5', '+5', '-0', '-0,0', '-0.0', '1 000', 'true', 'False', '2024-01-05', '05.01.2024', '1/2/2024', '00:30', '12:00:00',
@@ -22,20 +22,21 @@ describe('csv open + save round trip', () => {
         const { wb, line, field } = roundTrip(raw, sep);
         const value = wb.getValue(0, 1, 0);
         if (typeof value === 'number') {
-          // Only plain or correctly grouped decimals in the file's own notation become numbers;
-          // they may lose grouping and insignificant zeros (1.234,50 -> 1234,5) but keep their value.
+          // Only plain or correctly grouped decimals in the file's own notation become numbers.
           const group = sep === ';' ? '.' : ',';
           expect(raw, `${raw} became a number`).toMatch(sep === ';' ? /^-?(\d{1,3}(\.\d{3})+|\d*)(,\d+)?$/ : /^-?(\d{1,3}(,\d{3})+|\d*)(\.\d+)?$/);
-          expect(Number(line.replace(decimal, '.'))).toBe(Number(raw.split(group).join('').replace(decimal, '.')));
-        } else expect(line, raw).toBe(field);
+          expect(value).toBe(Number(raw.split(group).join('').replace(decimal, '.')));
+        }
+        // An unedited row is written back exactly as it was read.
+        expect(line, raw).toBe(field);
       }
     });
   }
 
-  it('keeps plain numbers numeric and normalises only cosmetic decimals', () => {
+  it('keeps plain numbers numeric and their spelling in unedited rows', () => {
     const de = roundTrip('12,50', ';');
     expect(de.wb.getValue(0, 1, 0)).toBe(12.5);
-    expect(de.line).toBe('12,5');
+    expect(de.line).toBe('12,50');
     expect(roundTrip('-3.25', ',').wb.getValue(0, 1, 0)).toBe(-3.25);
     expect(roundTrip('TRUE', ',').wb.getValue(0, 1, 0)).toBe(true);
   });
@@ -58,5 +59,35 @@ describe('csv open + save round trip', () => {
     }
     expect(detectCsvLayout('a\r\nb')).toEqual({ lineEnding: '\r\n', finalNewline: false, bom: false });
     expect(detectCsvLayout('﻿a\n')).toEqual({ lineEnding: '\n', finalNewline: true, bom: true });
+  });
+
+  it('rewrites only edited rows and keeps quoting, number spelling and short rows elsewhere', () => {
+    const text = 'Name;Preis;Info\r\n"Apfel";12,50\r\nBirne;1.234,00;"a ""b"""\r\nKirsche;3\r\n';
+    const decode = (wb: ReturnType<typeof openWorkbook>) => new TextDecoder().decode(saveWorkbook(wb, 'csv'));
+    const wb = openWorkbook(new TextEncoder().encode(text), 'a.csv');
+    setCellInput(wb, 0, 3, 1, '4');
+    expect(decode(wb)).toBe('Name;Preis;Info\r\n"Apfel";12,50\r\nBirne;1.234,00;"a ""b"""\r\nKirsche;4;\r\n');
+    // Original records move with inserted and deleted rows, also through undo.
+    wb.apply({ type: 'insertRows', sheet: wb.sheets[0]!.name, index: 1, count: 1 });
+    setCellInput(wb, 0, 1, 0, 'Neu');
+    expect(decode(wb)).toBe('Name;Preis;Info\r\nNeu;;\r\n"Apfel";12,50\r\nBirne;1.234,00;"a ""b"""\r\nKirsche;4;\r\n');
+    wb.apply({ type: 'deleteRows', sheet: wb.sheets[0]!.name, index: 2, count: 1 });
+    expect(decode(wb)).toBe('Name;Preis;Info\r\nNeu;;\r\nBirne;1.234,00;"a ""b"""\r\nKirsche;4;\r\n');
+    wb.undo();
+    expect(decode(wb)).toBe('Name;Preis;Info\r\nNeu;;\r\n"Apfel";12,50\r\nBirne;1.234,00;"a ""b"""\r\nKirsche;4;\r\n');
+  });
+
+  it('keeps blank lines after the data while they stay empty', () => {
+    const wb = openWorkbook(new TextEncoder().encode('a,b\n1,2\n\n\n'), 'a.csv');
+    expect(new TextDecoder().decode(saveWorkbook(wb, 'csv'))).toBe('a,b\n1,2\n\n\n');
+    setCellInput(wb, 0, 3, 0, 'x');
+    expect(new TextDecoder().decode(saveWorkbook(wb, 'csv'))).toBe('a,b\n1,2\n\nx,\n');
+  });
+
+  it('never writes an original record that no longer matches the values', () => {
+    // Same text, different meaning after an edit of the cell type: the record must be rewritten.
+    const wb = openWorkbook(new TextEncoder().encode('id\n0004711\n'), 'a.csv');
+    setCellInput(wb, 0, 1, 0, '4711');
+    expect(new TextDecoder().decode(saveWorkbook(wb, 'csv'))).toBe('id\n4711\n');
   });
 });
