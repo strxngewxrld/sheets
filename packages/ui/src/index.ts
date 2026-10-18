@@ -3,4 +3,5 @@ export { renderChartSvg, niceScale, compactNumber, PALETTE_LIGHT, PALETTE_DARK, 
 export { GridRenderer, Viewport, type GridTheme, type Highlight } from './grid.js';
 export { Geometry, Axis } from './geometry.js';
 export { getStrings, STRINGS, type Strings } from './i18n.js';
+export { describeConditionalRule, conditionalRuleLabel } from './rule-text.js';
 export { CSS, injectStyles } from './styles.js';

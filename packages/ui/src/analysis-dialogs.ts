@@ -1,4 +1,5 @@
 import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, hasFormulas, ICON_SETS, type IconSetName, type StylePatch, type Workbook, applyDataValidation, parseInput, validationAt, type DataValidation, type ValidationOperator, type ValidationType } from '@sheets/core';
+import { conditionalRuleLabel } from './rule-text.js';
 import type { Strings } from './i18n.js';
 import { setTableFilter, tableFilterValue, type SheetTable } from '@sheets/core';
 
@@ -326,7 +327,7 @@ export function openSortDialog(root: HTMLElement, wb: Workbook, sheetName: strin
 export function openConditionalDialog(root: HTMLElement, wb: Workbook, sheetName: string, selection: RangeAddress, s: Strings, onClose: () => void): void {
   const p = panel(root, s.conditionalFormatting, s, onClose);
   const sheet = wb.requireSheet(sheetName);
-  const choose = p.field(s.rule, select([['', s.newRule], ...sheet.conditionalFormats.map((r): [string, string] => [r.id, `${r.range} · ${r.type}`])], ''));
+  const choose = p.field(s.rule, select([['', s.newRule], ...sheet.conditionalFormats.map((r): [string, string] => [r.id, conditionalRuleLabel(r, s)])], ''));
   const range = p.field(s.dataRange, input(formatRange(selection)));
   const mode = p.field(s.ruleType, select([['greaterThan', s.greaterThan], ['lessThan', s.lessThan], ['between', s.between], ['expression', s.expression], ['colorScale', s.colorScale], ['dataBar', s.dataBar], ['iconSet', s.iconSet]], 'greaterThan'));
   const first = p.field(s.firstFormula, input('0'));
