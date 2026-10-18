@@ -150,8 +150,8 @@ describe('sorting preserved files', () => {
     // "b" kept its own format record (rotation and superscript are not modeled) and moved to row 3.
     expect(xml).toContain('<c r="A3" t="inlineStr" s="1"><is><t xml:space="preserve">b</t></is></c>');
     expect(xml).toContain('<c r="A2" s="0" t="inlineStr"><is><t xml:space="preserve">a</t></is></c>');
-    // Row-local formulas read the same after the move, so their XML stays untouched.
-    expect(xml).toContain('<c r="C2"><f>B2*2</f><v>3</v></c>');
+    // Row-local formulas read the same after the move; only their cached result follows the new value.
+    expect(xml).toContain('<c r="C2"><f>B2*2</f><v>6</v></c>');
     expect(xml).toContain('<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
     const back = readXlsx(saved);
     expect([1, 2, 3].map((r) => back.getValue(0, r, 0))).toEqual(['a', 'b', 'c']);

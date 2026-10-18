@@ -67,7 +67,8 @@ describe('lossless XLSX preservation', () => {
     const xml = strFromU8(back['xl/worksheets/sheet1.xml']!);
     expect(xml).toContain('<dataValidations count="1">');
     expect(xml).toContain('<u:payload xmlns:u="urn:unknown">keep me</u:payload>');
-    expect(xml).toContain('<c r="B3"><f>B2*2</f><v>20</v></c>');
+    // The unchanged formula keeps its XML; its cached result follows the edited input (B2 = 42).
+    expect(xml).toContain('<c r="B3"><f>B2*2</f><v>84</v></c>');
     const reopened = readXlsx(saved);
     expect(reopened.getValue(0, 1, 0)).toBe('Müller & <test> _x0041_\r\u000B');
     expect(reopened.getValue(0, 2, 1)).toBe(84);

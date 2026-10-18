@@ -9,6 +9,8 @@
 - CSV: Windows-1252 files (CSV exports of Excel on German/Western European Windows) are read and saved in their encoding instead of turning umlauts into replacement characters; text Windows-1252 cannot hold is saved as UTF-8 with BOM, with a one-time notice.
 - CSV: agent tools for unopened files and the MCP server keep the delimiter, decimal comma, line endings, BOM and encoding of a CSV file. Before, any agent edit rewrote a semicolon CSV with commas and decimal points.
 - CSV: a save always writes the file's data sheet, even when another sheet is active.
+- XLSX: formula results stored in the file follow edits. Unchanged formulas whose result changes (also on other sheets) get the new cached value, new formulas get their computed value; only formulas with functions the engine knows, never an invented result. Programs that read cached values without calculating no longer see stale results.
+- XLSX: an edit that only changes formula results on a protected sheet no longer blocks saving.
 - Recursive LAMBDA formulas that never end stop after 1000 nested calls with #CALC! within milliseconds instead of freezing the editor for about half a second.
 - CSV: a one-time, non-blocking notice when a save drops content CSV cannot hold (other sheets, charts, formulas, formatting, ...). "Save As" writes the format of the target file. Cell texts starting with `=`, `+`, `-` or `@` are written unchanged (see the CSV injection note in docs/xlsx-compatibility.md).
 - Editor: a loading notice while large files are parsed; files that cannot be opened show the error in the editor and are never saved (no more "getFileData timed out").

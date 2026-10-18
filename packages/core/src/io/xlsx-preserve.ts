@@ -45,14 +45,16 @@ function sameCellContent(a: CellData | undefined, b: CellData | undefined): bool
 function sameModel(a: WorkbookData, b: WorkbookData): boolean {
   const strip = ({ xlsxSource: _source, activeSheet: _active, sheets: _sheets, ...rest }: WorkbookData) => rest;
   if (!sameValue(strip(a), strip(b)) || a.sheets.length !== b.sheets.length) return false;
-  return a.sheets.every((sa, i) => {
-    const sb = b.sheets[i]!;
-    const { cells: ca, ...ra } = sa, { cells: cb, ...rb } = sb;
-    if (!sameValue(ra, rb)) return false;
-    for (const key in ca) if (!sameCellContent(ca[key], cb[key])) return false;
-    for (const key in cb) if (!(key in ca) && !sameCellContent(undefined, cb[key])) return false;
-    return true;
-  });
+  return a.sheets.every((sa, i) => sameSheetContent(sa, b.sheets[i]!));
+}
+
+/** Whether two sheets have the same content; computed formula results are not content. */
+function sameSheetContent(sa: SheetData, sb: SheetData): boolean {
+  const { cells: ca, ...ra } = sa, { cells: cb, ...rb } = sb;
+  if (!sameValue(ra, rb)) return false;
+  for (const key in ca) if (!sameCellContent(ca[key], cb[key])) return false;
+  for (const key in cb) if (!(key in ca) && !sameCellContent(undefined, cb[key])) return false;
+  return true;
 }
 
 function sheetMetadata({ cells: _cells, colWidths: _cols, rowHeights: _rows, validations: _validations, ...sheet }: SheetData): unknown {
@@ -84,6 +86,48 @@ function textValue(value: string): string {
   return escapeXml(encodeOoxmlEscapes(value));
 }
 
+/**
+ * The cached result (<v> and cell type) of a formula as computed by the engine, or
+ * undefined when it must not be cached: dynamic arrays, results without a value and
+ * formulas with functions the engine does not know (their result would be invented).
+ */
+function computedCache(cell: CellData | undefined, p: string, names: Set<string>): { type: string | undefined; body: string } | undefined {
+  if (cell?.f === undefined || cell.a) return undefined;
+  try {
+    if (hasUnknownFunctions(parseFormula(cell.f), (name) => names.has(name.toUpperCase()))) return undefined;
+  } catch { return undefined; }
+  const v = cell.v;
+  if (typeof v === 'number') return Number.isFinite(v) ? { type: undefined, body: `<${p}v>${v}</${p}v>` } : undefined;
+  if (typeof v === 'string') return { type: 'str', body: `<${p}v>${textValue(v)}</${p}v>` };
+  if (typeof v === 'boolean') return { type: 'b', body: `<${p}v>${v ? 1 : 0}</${p}v>` };
+  if (v && typeof v === 'object') return { type: 'e', body: `<${p}v>${escapeXml(v.error)}</${p}v>` };
+  return undefined;
+}
+
+/**
+ * Replaces the cached result of an unchanged formula whose value changed through
+ * other edits, so programs that read caches without calculating (data imports,
+ * openpyxl, pandas) see current values. Cells with structures beyond a plain or
+ * shared formula keep their original XML; Excel recalculates them on opening.
+ */
+function refreshCache(xml: string, node: XmlSpan, cell: CellData | undefined, p: string, names: Set<string>): string {
+  const result = raw(xml, node);
+  const root = xmlRoot(result), open = result.slice(0, root.openEnd);
+  if (attribute(open, 'cm') !== undefined || attribute(open, 'vm') !== undefined) return result;
+  if (!['n', 'b', 'str', 'e'].includes(attribute(open, 't') ?? 'n') || root.children.some((c) => !['f', 'v'].includes(c.name))) return result;
+  const f = child(root, 'f');
+  const formulaType = f ? attribute(result.slice(f.start, f.openEnd), 't') : undefined;
+  if (!f || (formulaType !== undefined && formulaType !== 'normal' && formulaType !== 'shared')) return result;
+  const cache = computedCache(cell, p, names);
+  if (!cache) return result;
+  const v = child(root, 'v');
+  return editXml(result, [
+    { start: 0, end: root.openEnd, value: setAttribute(open, 't', cache.type) },
+    ...(v ? [{ start: v.start, end: v.end, value: '' }] : []),
+    { start: f.end, end: f.end, value: cache.body },
+  ]);
+}
+
 const AFTER_VALIDATIONS = ['hyperlinks', 'printOptions', 'pageMargins', 'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors', 'smartTags', 'drawing', 'legacyDrawing', 'legacyDrawingHF', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'];
 
 /** Replaces the sheet's <dataValidations>; Excel 2010 rules in extLst cannot be merged safely. */
@@ -96,7 +140,7 @@ function patchValidations(xml: string, before: SheetData, after: SheetData): str
   return setChild(xml, 'dataValidations', rules.length ? validationsXml(rules, prefix(root)) : '', AFTER_VALIDATIONS);
 }
 
-function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: () => PreservedStyles, inheritedStyle: number, richStrings: { has(index: number): boolean }, table?: string, styleIndex?: number): string {
+function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before: CellData | undefined, after: CellData | undefined, p: string, styles: () => PreservedStyles, inheritedStyle: number, richStrings: { has(index: number): boolean }, names: Set<string>, table?: string, styleIndex?: number): string {
   const valueChanged = !sameValue(payload(before), payload(after));
   let result = node ? raw(xml, node) : `<${p}c r="${ref}"/>`;
   let root = xmlRoot(result), open = result.slice(0, root.openEnd);
@@ -113,7 +157,9 @@ function updateCell(xml: string, node: XmlSpan | undefined, ref: string, before:
     let type: string | undefined, body = '';
     if (after?.f !== undefined) {
       body = `<${p}f>${escapeXml(addFutureFunctionPrefixes(after.f, table ? { table } : {}))}</${p}f>`;
-      // New/edited formulas are recalculated by Excel; never invent an error cache.
+      // Cache the computed result only for formulas the engine fully understands, never an invented one.
+      const cache = computedCache(after, p, names);
+      if (cache) { body += cache.body; type = cache.type; }
     } else if (typeof after?.v === 'string') {
       type = 'inlineStr'; body = `<${p}is><${p}t xml:space="preserve">${textValue(after.v)}</${p}t></${p}is>`;
     } else if (typeof after?.v === 'number') {
@@ -271,7 +317,14 @@ function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][n
   const { date1904, hasCalcChain, richStrings, lockedRanges } = ctx;
   const changes = [...new Set([...Object.keys(before.cells), ...Object.keys(after.cells)])]
     .filter((key) => !sameValue([payload(before.cells[key]), before.cells[key]?.s], [payload(after.cells[key]), after.cells[key]?.s]));
-  if (!changes.length) return xml;
+  // Unchanged formulas whose result changed through edits get a current cache. This
+  // never blocks a save: cells that cannot be refreshed safely keep their XML.
+  const changed = new Set(changes);
+  const refreshes = date1904 || child(root, 'sheetProtection') ? [] : Object.keys(after.cells).filter((key) => {
+    const a = after.cells[key], b = before.cells[key];
+    return !changed.has(key) && a?.f !== undefined && b?.f === a.f && !a.a && !b.a && !sameValue(a.v ?? null, b.v ?? null);
+  });
+  if (!changes.length && !refreshes.length) return xml;
   const p = prefix(root);
   if (root.name !== 'worksheet') protect('Nicht unterstützter Blatttyp.', 'Unsupported sheet type.');
   if (child(root, 'sheetProtection')) protect(`Blattschutz in ${before.name}.`, `Sheet protection in ${before.name}.`);
@@ -305,6 +358,11 @@ function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][n
     }
     const list = changedRows.get(a.row) ?? []; list.push(ref); changedRows.set(a.row, list);
   }
+  for (const ref of refreshes) {
+    const a = parseAddress(ref);
+    if (!a || !rows.has(a.row) || within(a, arrays.map((r) => r?.range))) continue;
+    const list = changedRows.get(a.row) ?? []; list.push(ref); changedRows.set(a.row, list);
+  }
   // Cells are resolved only in rows that change; other rows are copied unchanged.
   for (const index of changedRows.keys()) {
     const row = rows.get(index);
@@ -333,12 +391,17 @@ function patchSheet(xml: string, root: XmlSpan, before: WorkbookData['sheets'][n
     const offset = row?.start ?? 0;
     for (const ref of refs.sort((a, b) => parseAddress(a)!.col - parseAddress(b)!.col)) {
       const node = cells.get(ref);
+      if (!changed.has(ref)) {
+        // A cache refresh only edits existing formula cells.
+        if (node) edits.push({ start: node.start - offset, end: node.end - offset, value: refreshCache(xml, node, after.cells[ref], p, ctx.names) });
+        continue;
+      }
       if (!node && row?.children.some((c) => c.name === 'c' && nodeAttribute(xml, c, 'r') === undefined)) protect('Neue Zellen bei impliziten Original-Zelladressen.', 'New cells in a row with implicit cell addresses.');
       const col = parseAddress(ref)!.col;
       const at = parseAddress(ref);
       const table = at ? tableNameAt(after.tables ?? [], at.row, at.col) : undefined;
       const styleIndex = sortedFormats?.get(canonical(after.cells[ref]?.s ?? null));
-      const value = updateCell(xml, node, ref, before.cells[ref], after.cells[ref], p, ctx.styles, inheritedStyle(xml, root, row, col), richStrings, table, styleIndex);
+      const value = updateCell(xml, node, ref, before.cells[ref], after.cells[ref], p, ctx.styles, inheritedStyle(xml, root, row, col), richStrings, ctx.names, table, styleIndex);
       if (node) edits.push({ start: node.start - offset, end: node.end - offset, value });
       else {
         const next = row?.children.find((n) => n.name === 'c' && parseAddress(nodeAttribute(xml, n, 'r') ?? '')?.col! > col);
@@ -532,7 +595,8 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
     }
     if (sameValue(before, after)) continue;
     const originalRoot = xmlRoot(originalSheet, 3);
-    if (child(originalRoot, 'sheetProtection')) protect(`Blattschutz in ${before.name}.`, `Sheet protection in ${before.name}.`);
+    // Only edits count; new results of formulas that depend on other sheets do not.
+    if (child(originalRoot, 'sheetProtection') && !sameSheetContent(before, after)) protect(`Blattschutz in ${before.name}.`, `Sheet protection in ${before.name}.`);
     const patched = patchValidations(patchLayout(patchSheet(originalSheet, originalRoot, before, after, context(before.name, lockedRanges)), before, after), before, after);
     if (patched !== originalSheet) { xmlRoot(patched, 1); files[entry.rel.target] = strToU8(patched); }
   }

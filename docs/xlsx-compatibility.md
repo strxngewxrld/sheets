@@ -42,7 +42,16 @@ Die Gründe einer Schutzmeldung folgen der Sprache der Oberfläche (Deutsch oder
 | Digitale Signaturen | Unverändertes Speichern ist möglich. Änderungen werden blockiert, um Signaturen nicht stillschweigend ungültig zu machen. |
 | Geschützte Blätter, Datumssystem 1904, unbekannte Zellmetadaten | Nicht sicher unterstützte Änderungen werden blockiert. Die Originaldatei bleibt bestehen. |
 
-Die Neuberechnung im Editor unterstützt weiterhin nur die implementierten Formeln. Unveränderte Formel-Caches im Dateipaket werden beibehalten; geänderte Formeln erhalten keinen erfundenen Cache. Die Datei wird für eine vollständige Neuberechnung durch Excel markiert. Andere Programme, die ausschließlich gespeicherte Ergebnisse lesen und keine Berechnung durchführen, können bis dahin alte oder fehlende Formel-Ergebnisse sehen.
+Die Neuberechnung im Editor unterstützt weiterhin nur die implementierten Formeln. Formel-Caches (das gespeicherte Ergebnis `<v>`) werden so behandelt:
+
+- Ändert sich das Ergebnis einer unveränderten Formel durch eine Bearbeitung – auch auf einem anderen Blatt –, wird nur ihr `<v>` (und der Zelltyp `t`) auf das berechnete Ergebnis gesetzt; die Formel und alle übrigen Attribute bleiben bytegleich. Formeln, deren Ergebnis gleich bleibt, werden nicht angefasst.
+- Neue und geänderte Formeln erhalten ihr berechnetes Ergebnis als Cache.
+- Beides gilt nur, wenn die Engine alle Funktionen der Formel kennt. Formeln mit unbekannten Funktionen behalten ihren Cache bzw. erhalten keinen – ein Ergebnis wird nie erfunden. Ebenso unverändert bleiben Matrixformeln, Datentabellen, dynamische Matrizen, Zellen mit Metadaten, geschützte Blätter und Dateien mit Datumssystem 1904. Ein Cache-Abgleich führt nie zu einer Speichersperre.
+- Die Datei wird zusätzlich für eine vollständige Neuberechnung durch Excel markiert.
+
+Programme, die ausschließlich gespeicherte Ergebnisse lesen (Datenimporte, openpyxl mit `data_only`, pandas), sehen damit aktuelle Werte, außer bei den genannten Ausnahmen. Ergebnisse, die von Gebietsschema oder Programm abhängen (z. B. `TEXT` mit Dezimalzeichen), entsprechen der Berechnung im Editor, bis Excel neu rechnet.
+
+Blattschutz verhindert Bearbeitungen des geschützten Blatts. Ändert eine Bearbeitung auf einem anderen Blatt nur die Ergebnisse von Formeln auf dem geschützten Blatt, wird gespeichert und das geschützte Blatt bleibt unverändert.
 
 ## Speichern, Wiederherstellen und Konflikte
 
