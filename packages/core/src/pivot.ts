@@ -45,8 +45,9 @@ function add(state: Aggregate, value: Scalar): void {
   }
 }
 
-function result(state: Aggregate | undefined, type: PivotAggregate): Scalar {
-  if (!state) return type === 'average' ? null : 0;
+function result(state: Aggregate | undefined, type: PivotAggregate, total: boolean): Scalar {
+  // Like Excel, a row/column combination without records stays empty; totals of an empty source are 0.
+  if (!state) return total && type !== 'average' ? 0 : null;
   if (type === 'count') return state.count;
   if (state.error) return state.error;
   switch (type) {
@@ -121,7 +122,7 @@ export function evaluatePivot(wb: Workbook, spec: PivotTableSpec): Matrix {
   if (outputWidth > MAX_COLS || outputHeight > MAX_ROWS || outputHeight * outputWidth > 1_000_000) throw new Error('Pivot output exceeds the cell limit');
   const header: Scalar[] = [...rowFields.map((c) => headers[c]!), ...columnGroups.flatMap((g) => measures.map((m) => [g.prefix, m.label ?? `${m.aggregate.toUpperCase()} ${headers[m.index]}`].filter(Boolean).join(' / ')))];
   const output: Matrix = [header];
-  const rowFor = (key: string | null, labels: Scalar[]) => [...labels, ...columnGroups.flatMap((g) => measures.map((m, i) => result(states.get(JSON.stringify([key, g.key]))?.[i], m.aggregate)))];
+  const rowFor = (key: string | null, labels: Scalar[]) => [...labels, ...columnGroups.flatMap((g) => measures.map((m, i) => result(states.get(JSON.stringify([key, g.key]))?.[i], m.aggregate, key === null || g.key === null)))];
   for (const [key, tuple] of rowGroups) output.push(rowFor(key, tuple.map((v) => v ?? '(blank)')));
   if (spec.grandTotalRow !== false && rowFields.length) output.push(rowFor(null, rowFields.map((_, i) => i === 0 ? 'Grand Total' : null)));
   return output;
@@ -203,7 +204,14 @@ export function createPivotTable(wb: Workbook, spec: PivotTableSpec, options: Ap
     cells.set(cellKey(row, col), { row, col, data: { v: scalarToJson(v), ...(cell?.style ? { s: cell.style } : {}) } });
   }));
   const updated = structuredClone({ ...spec, source: { ...spec.source, sheet: wb.requireSheet(spec.source.sheet).name }, target: { ...spec.target, sheet: target.name }, outputRange: formatRange(range) });
+  // Widen output columns that are too narrow for their headers or values (never narrower, at most 320 px).
+  const sizes = matrix[0]!.map((_, c) => {
+    const chars = Math.max(...matrix.map((line) => { const v = line[c]; return typeof v === 'number' ? String(Math.round(v * 100) / 100).length : v === null ? 0 : String(isError(v) ? v.code : v).length; }));
+    const col = anchor.col + c, needed = Math.min(320, chars * 7 + 12);
+    return needed > target.colWidth(col) && target.colWidth(col) > 0 ? { index: col, size: needed } : null;
+  }).filter((size): size is { index: number; size: number } => size !== null);
   wb.apply([
+    ...(sizes.length ? [{ type: 'setColWidths' as const, sheet: target.name, sizes }] : []),
     { type: 'setCells', sheet: target.name, cells: [...cells.values()] },
     { type: 'setPivotTables', tables: [...wb.pivotTables.filter((p) => p.id !== spec.id), updated] },
   ], options);

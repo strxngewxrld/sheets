@@ -16,7 +16,8 @@ describe('pivot reports', () => {
     const { wb, spec } = example();
     expect(evaluatePivot(wb, spec)).toEqual([
       ['Region', 'Apple / SUM Sales', 'Pear / SUM Sales', 'Grand Total / SUM Sales'],
-      ['North', 50, 20, 70], ['South', 30, 0, 30], ['Grand Total', 80, 20, 100],
+      // South has no Pear records: the cell stays empty as in Excel (it used to show 0).
+      ['North', 50, 20, 70], ['South', 30, null, 30], ['Grand Total', 80, 20, 100],
     ]);
     const pivot = createPivotTable(wb, spec);
     expect(pivot.outputRange).toBe('B2:E5');
@@ -126,5 +127,24 @@ describe('pivot reports', () => {
     const wb = new Workbook();
     setValues(wb, 0, 0, 0, [['Row', 'Col', 'Value'], ...Array.from({ length: 1100 }, (_, i) => [i, i, 1])]);
     expect(() => evaluatePivot(wb, { id: 'large', source: { sheet: 'Sheet1', range: 'A1:C1101' }, target: { sheet: 'Sheet1', cell: 'E1' }, rows: [0], columns: [1], values: [{ field: 2, aggregate: 'sum' }] })).toThrow(/cell limit/);
+  });
+
+  it('keeps real zero sums, totals of empty sources and widens narrow output columns', () => {
+    const { wb, spec } = example();
+    setValues(wb, 0, 5, 0, [['South', 'Pear', 5], ['South', 'Pear', -5]]);
+    spec.source.range = 'A1:C7';
+    expect(evaluatePivot(wb, spec)[2]).toEqual(['South', 30, 0, 30]);
+    const empty = new Workbook();
+    setValues(empty, 0, 0, 0, [['Region', 'Sales']]);
+    expect(evaluatePivot(empty, { id: 'e', source: { sheet: 'Sheet1', range: 'A1:B3' }, target: { sheet: 'Sheet1', cell: 'D1' }, rows: ['Region'], values: [{ field: 'Sales', aggregate: 'sum' }] }).at(-1)).toEqual(['Grand Total', 0]);
+    const report = wb.requireSheet('Report');
+    wb.apply({ type: 'setColWidths', sheet: 'Report', sizes: [{ index: 2, size: 300 }] });
+    createPivotTable(wb, spec);
+    // "Grand Total / SUM Sales" needs more than the default width; wider columns are kept.
+    expect(report.colWidth(4)).toBeGreaterThan(150);
+    expect(report.colWidth(2)).toBe(300);
+    expect(report.getCell(3, 3)?.value ?? null).toBe(0);
+    wb.undo();
+    expect(report.colWidths.has(4)).toBe(false);
   });
 });
