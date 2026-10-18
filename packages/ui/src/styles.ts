@@ -162,6 +162,8 @@ export const CSS = `
   border: 1px solid var(--sx-grid); border-radius: 8px; box-shadow: var(--sx-shadow); padding: 12px 12px 0; display: grid; gap: 8px; font-size: 13px;
   /* Never taller than the editor: the content scrolls and the buttons stay reachable at the bottom. */
   box-sizing: border-box; max-height: calc(100% - 32px); overflow-y: auto; overscroll-behavior: contain;
+  /* Focused fields scroll into view above the sticky button row instead of behind it. */
+  scroll-padding-bottom: 56px;
 }
 .sx-dialog h3 { margin: 0 0 4px; font-size: 14px; }
 .sx-dialog label { display: grid; gap: 3px; font-size: 12px; color: var(--sx-muted); }
