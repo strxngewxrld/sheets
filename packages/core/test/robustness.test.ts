@@ -100,4 +100,14 @@ describe('formula engine robustness', () => {
   t('whole-column sum is fast', () => { const wb = new Workbook(); setValues(wb, 0, 0, 0, [[1], [2]]); const s = Date.now(); expect(wb.evaluate('=SUM(A:A)')).toBe(3); expect(Date.now() - s).toBeLessThan(10_000); });
   t('huge repetition yields an error value instead of throwing', () => { expect(String(ev('=REPT("x",1000000000)'))).toMatch(/#/); expect(String(ev('=SEQUENCE(100000,1000)'))).toMatch(/#/); });
   t('locale/edge numbers', () => { expect(ev('=0.1+0.2')).toBeCloseTo(0.3); expect(ev('=2^1024')).toBeDefined(); expect(ev('=-5^2')).toBe(25); });
+  t('runaway LAMBDA recursion stops at a fixed depth, legitimate recursion still works', () => {
+    const wb = new Workbook();
+    wb.apply({ type: 'setName', name: 'LOOP', ref: 'LAMBDA(n, LOOP(n+1))' });
+    wb.apply({ type: 'setName', name: 'DOWN', ref: 'LAMBDA(n, IF(n=0, "done", DOWN(n-1)))' });
+    expect(String(wb.evaluate('=LOOP(1)'))).toBe('#CALC!');
+    expect(wb.evaluate('=DOWN(900)')).toBe('done');
+    expect(String(wb.evaluate('=DOWN(5000)'))).toBe('#CALC!');
+    // A loop after a failed one starts at depth 0 again.
+    expect(wb.evaluate('=DOWN(10)')).toBe('done');
+  });
 });

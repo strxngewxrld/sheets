@@ -69,11 +69,26 @@ export function withLocals(ctx: EvalContext, bindings: Iterable<[string, EvalVal
   return Object.assign(Object.create(ctx) as EvalContext, { locals });
 }
 
+/**
+ * Nested LAMBDA calls before a formula counts as runaway recursion. Failing here
+ * takes milliseconds; running into the engine's stack limit took about half a
+ * second per evaluation and froze the editor while typing.
+ */
+const MAX_LAMBDA_DEPTH = 1000;
+let lambdaDepth = 0;
+
 /** Calls a LAMBDA with already evaluated arguments. */
 export function callLambda(fn: LambdaValue, args: EvalValue[], ctx: EvalContext): EvalValue {
   if (args.length > fn.params.length) return Err.VALUE;
+  // A RangeError is reported like a stack overflow: #CALC! "Recursion too deep".
+  if (lambdaDepth >= MAX_LAMBDA_DEPTH) throw new RangeError('LAMBDA recursion too deep');
   const caller = Object.assign(Object.create(fn.scope) as EvalContext, { row: ctx.row, col: ctx.col });
-  return evaluate(fn.body, withLocals(caller, fn.params.map((p, i) => [p, args[i] ?? null])));
+  lambdaDepth++;
+  try {
+    return evaluate(fn.body, withLocals(caller, fn.params.map((p, i) => [p, args[i] ?? null])));
+  } finally {
+    lambdaDepth--;
+  }
 }
 
 export function isMatrix(v: EvalValue): v is Matrix {
