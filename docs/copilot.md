@@ -24,7 +24,7 @@ Für eine konkrete Migration:
 - `npm run check:package`: Manifest und Registrierung aller Werkzeuge, getrennte Bestätigungen für Lese-/Schreibwerkzeuge, Abbruch vor einer Mutation, Weiterleitung durch den Webview und Behandlung von Werkzeugfehlern; dafür wird die VS-Code-API nachgebildet.
 - `npm run test:host`: echter VS-Code-Extension-Host mit separatem Profil. Prüft Sichtbarkeit in `vscode.lm.tools`, `vscode.lm.invokeTool` für gespeicherte und im Editor geöffnete XLSX-Dateien sowie die Zurückweisung ungültiger Eingaben. Es wird kein Sprachmodell aufgerufen und kein Copilot-Chat versendet.
 
-Der Host-Test verwendet das lokal installierte VS Code. Auf macOS wird der Standardpfad verwendet; ansonsten wird `code` im PATH erwartet. Über `VSCODE_EXECUTABLE` lässt sich ein anderer CLI-Pfad angeben. Ein grafischer Desktop ist erforderlich.
+Der Host-Test verwendet das lokal installierte VS Code. Auf macOS wird der Standardpfad verwendet; unter Linux wird `code` im PATH erwartet. Unter Windows wird `code.cmd` im PATH gesucht und die benachbarte `Code.exe` ohne Shell gestartet. Über `VSCODE_EXECUTABLE` lässt sich ein anderer CLI-Pfad oder unter Windows der direkte Pfad zur `Code.exe` angeben. Ein grafischer Desktop ist erforderlich.
 
 Das prüft die technische Werkzeugstrecke, nicht die Auswahl eines bestimmten Werkzeugs durch ein bestimmtes Copilot-Modell. Für einen vollständigen Copilot-Chat-Test müssen die Werkzeuge in eurem angemeldeten Chat aktiviert sein.
 

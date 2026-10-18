@@ -3,11 +3,11 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { vscodeExecutable } from './vscode-executable.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const executable = process.env.VSCODE_EXECUTABLE ?? (process.platform === 'darwin'
-  ? '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' : 'code');
-if (executable.includes('/')) await access(executable);
+const executable = vscodeExecutable();
+if (/[\\/]/.test(executable)) await access(executable);
 const dir = await mkdtemp(join(tmpdir(), 'sheets-host-test-'));
 const profile = join(dir, 'user-data');
 const resultPath = join(dir, 'result.json');

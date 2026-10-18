@@ -39,7 +39,7 @@
   "displayName": "Sheets – Excel & CSV Editor",
   "description": "%extension.description%",
   "version": "1.0.1",
-  "publisher": "sheets",
+  "publisher": "Tom Knüppel",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/strxngewxrld/sheets.git"

@@ -1981,6 +1981,9 @@ export class SpreadsheetView {
   }
 
   private onKeyDown(e: KeyboardEvent, input: HTMLInputElement | HTMLTextAreaElement): void {
+    // AltGr can report Ctrl+Alt on Windows/Linux. Keep character entry (e.g.
+    // @, brackets and backslashes) out of shortcut handling, including AltGr+V.
+    if (e.isComposing || e.getModifierState('AltGraph')) return;
     const mod = e.ctrlKey || e.metaKey;
     const ed = this.editor;
     if (ed.editing) {

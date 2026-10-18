@@ -27,6 +27,8 @@ Die ausführliche [Framework-Dokumentation](docs/framework.md) beschreibt die in
 
 `npm test` prüft Core, UI, Agent-Werkzeuge und den realen Webview-Nachrichtenhandler mit einem ersetzten DOM-View. `npm run package` erzeugt die VSIX und prüft Inhalt, Manifest, Übersetzungen, Icon und Aktivierung des tatsächlich gepackten Host-Bundles mit einer nachgebildeten VS-Code-API. Diese Prüfungen ersetzen nicht den manuellen Test der VS-Code-Oberfläche.
 
+Die GitHub-Actions-Matrix führt Typecheck, Tests und VSIX-Paketierung unter Ubuntu, Windows und macOS aus. Die Artefakte heißen `sheets-vscode-<runner-os>` und enthalten jeweils dieselbe plattformunabhängige Extension. Die grafischen Host-Tests werden separat lokal ausgeführt.
+
 ## Aufräumen und Host-Test
 
 `npm run clean` entfernt ausschließlich Build-Ausgaben und TypeScript-Caches der bekannten Projekte. Quellen und erzeugte VSIX-Artefakte bleiben erhalten. Der frühere Pfad `apps/vscode` wird entfernt, soweit dort nur noch erzeugte Dateien und leere Ordner liegen.

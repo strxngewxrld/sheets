@@ -9,6 +9,7 @@ import { registerCopilotTools } from './copilot.js';
 import { decodeBytes } from './binary.js';
 import type { CsvExport } from './protocol.js';
 import { checkForUpdates, downloadVsix } from './update-check.js';
+import { resolveFileUri } from './file-uri.js';
 
 export interface SheetsApi {
   /** Tool definitions (name, description, JSON schema). */
@@ -155,10 +156,8 @@ async function exportCsv(): Promise<void> {
 function resolveUri(file: string | vscode.Uri | undefined): vscode.Uri | undefined {
   if (!file) return provider.activeDocument?.uri;
   if (typeof file !== 'string') return file;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(file)) return vscode.Uri.parse(file);
-  if (file.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(file)) return vscode.Uri.file(file);
   const folder = vscode.workspace.workspaceFolders?.[0];
-  return folder ? vscode.Uri.joinPath(folder.uri, file) : vscode.Uri.file(file);
+  return resolveFileUri(file, folder?.uri);
 }
 
 async function executeTool(name: string, input: Record<string, unknown>, file?: string | vscode.Uri): Promise<ToolResult> {

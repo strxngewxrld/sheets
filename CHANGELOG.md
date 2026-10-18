@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+
+- Fix Windows agent file paths: recognize UNC shares and normalize relative backslash paths, including remote workspaces.
+- Preserve AltGr character input on Windows/Linux and IME composition instead of triggering editor shortcuts.
+- Launch the VS Code host test through Code.exe on Windows, including installation paths with spaces.
+- Run typechecks, tests and VSIX packaging on Windows, macOS and Linux in CI; document desktop OS support.
+
 ## 1.0.1
 
 - Fix: installing an update from the update notice failed with "No Servers".

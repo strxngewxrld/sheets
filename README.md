@@ -21,6 +21,8 @@ code --install-extension artifacts/sheets-vscode-1.0.1.vsix
 
 Voraussetzungen: VS Code 1.95 oder neuer; zum Entwickeln und Paketieren Node.js 22 oder neuer. Das Paket enthält alle Laufzeitabhängigkeiten.
 
+Sheets ist für VS Code Desktop unter **Windows, macOS und Linux** ausgelegt. Dieselbe VSIX enthält ausschließlich JavaScript und funktioniert ohne Excel oder native Zusatzmodule auf allen drei Systemen. Tastenkürzel verwenden `Ctrl` unter Windows/Linux und `Cmd` unter macOS; AltGr-Zeichen werden als Texteingabe behandelt. Agent-Werkzeuge akzeptieren auch Windows-Laufwerkspfade, UNC-Netzwerkpfade und relative Pfade mit Backslashes. Die CI prüft Tests, Build und VSIX-Paketierung auf allen drei Betriebssystemen. Eine reine Browser-Installation (vscode.dev) wird nicht unterstützt.
+
 Beim Start von VS Code prüft Sheets, ob in den GitHub Releases eine neuere Version liegt, und bietet dann einen Link zum Release an. Dabei wird nur die öffentliche GitHub-API abgefragt; es werden keine Daten gesendet. Abschalten lässt sich das mit `sheets.checkForUpdates`.
 
 ## Erste Schritte
