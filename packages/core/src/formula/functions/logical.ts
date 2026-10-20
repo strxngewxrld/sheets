@@ -8,10 +8,14 @@ function lazy(name: string, syntax: string, description: string, impl: LazyFunct
   return { name, category: 'logical', syntax, description, lazy: true, impl, ...extra };
 }
 
-function evalArg(node: Node | undefined, ctx: FunctionContext, fallback: EvalValue): EvalValue {
+function evalArg(node: Node | undefined, ctx: FunctionContext, fallback: EvalValue, tail = false): EvalValue {
   if (!node) return fallback;
   if (node.type === 'missing') return 0;
-  return ctx.evaluate(node);
+  return tail ? evalTail(node, ctx) : ctx.evaluate(node);
+}
+
+function evalTail(node: Node, ctx: FunctionContext): EvalValue {
+  return ctx.evaluateTail ? ctx.evaluateTail(node) : ctx.evaluate(node);
 }
 
 function condition(node: Node, ctx: FunctionContext): boolean | CellError {
@@ -55,13 +59,13 @@ export const logicalFunctions: FunctionDef[] = [
     }
     const cond = toBoolean(test);
     if (isError(cond)) return cond;
-    return cond ? evalArg(t, ctx, true) : evalArg(f, ctx, false);
+    return cond ? evalArg(t, ctx, true, true) : evalArg(f, ctx, false, true);
   }, { minArgs: 2, maxArgs: 3 }),
   lazy('IFS', 'IFS(condition1, value1, [condition2, value2], ...)', 'Returns the value of the first true condition.', (args, ctx) => {
     for (let i = 0; i + 1 < args.length; i += 2) {
       const cond = condition(args[i]!, ctx);
       if (isError(cond)) return cond;
-      if (cond) return ctx.evaluate(args[i + 1]!);
+      if (cond) return evalTail(args[i + 1]!, ctx);
     }
     return Err.NA;
   }, { minArgs: 2 }),
@@ -71,27 +75,27 @@ export const logicalFunctions: FunctionDef[] = [
       const fallback = toScalar(evalArg(alt, ctx, 0), ctx);
       return r.map((row) => row.map((x) => (isError(x) ? fallback : x)));
     }
-    return isError(r) ? evalArg(alt, ctx, 0) : r;
+    return isError(r) ? evalArg(alt, ctx, 0, true) : r;
   }, { minArgs: 2, maxArgs: 2 }),
   lazy('IFNA', 'IFNA(value, value_if_na)', 'Returns a fallback if the value is #N/A.', ([v, alt], ctx) => {
     const r = ctx.evaluate(v!);
     const s = toScalar(r, ctx);
-    return isError(s) && s.code === '#N/A' ? evalArg(alt, ctx, 0) : r;
+    return isError(s) && s.code === '#N/A' ? evalArg(alt, ctx, 0, true) : r;
   }, { minArgs: 2, maxArgs: 2 }),
   lazy('SWITCH', 'SWITCH(expression, value1, result1, [default_or_value2, result2], ...)', 'Matches an expression against values.', ([expr, ...rest], ctx) => {
     const v = toScalar(ctx.evaluate(expr!), ctx);
     if (isError(v)) return v;
     for (let i = 0; i + 1 < rest.length; i += 2) {
       const candidate = toScalar(ctx.evaluate(rest[i]!), ctx);
-      if (compareScalars(v, candidate) === 0 && typeof v === typeof candidate) return ctx.evaluate(rest[i + 1]!);
+      if (compareScalars(v, candidate) === 0 && typeof v === typeof candidate) return evalTail(rest[i + 1]!, ctx);
     }
-    return rest.length % 2 === 1 ? ctx.evaluate(rest.at(-1)!) : Err.NA;
+    return rest.length % 2 === 1 ? evalTail(rest.at(-1)!, ctx) : Err.NA;
   }, { minArgs: 3 }),
   lazy('CHOOSE', 'CHOOSE(index, value1, [value2], ...)', 'Picks a value by index.', ([idx, ...rest], ctx) => {
     const i = toScalar(ctx.evaluate(idx!), ctx);
     const n = typeof i === 'number' ? Math.trunc(i) : NaN;
     if (!(n >= 1 && n <= rest.length)) return Err.VALUE;
-    return ctx.evaluate(rest[n - 1]!);
+    return evalTail(rest[n - 1]!, ctx);
   }, { minArgs: 2 }),
   def('AND', 'logical', 'AND(logical1, [logical2], ...)', 'TRUE if all arguments are TRUE.', (args, ctx) => {
     const vs = logicalValues(args, ctx);

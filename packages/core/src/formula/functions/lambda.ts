@@ -55,7 +55,7 @@ export const lambdaFunctions: FunctionDef[] = [
       const name = paramName(args[i]!);
       scope = withLocals(scope, [[name, evaluate(args[i + 1]!, scope)]]);
     }
-    return evaluate(args.at(-1)!, scope);
+    return ctx.evaluateTail ? ctx.evaluateTail(args.at(-1)!, scope) : evaluate(args.at(-1)!, scope);
   }, { minArgs: 3 }),
   lazy('LAMBDA', 'LAMBDA([parameter1, ...], calculation)', 'Creates a reusable function, e.g. for MAP, REDUCE or a defined name.', (args, ctx) => {
     const params = args.slice(0, -1).map(paramName);

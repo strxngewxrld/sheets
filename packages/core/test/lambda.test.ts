@@ -16,6 +16,57 @@ function calc(formula: string, setup?: (wb: Workbook) => void) {
 }
 
 describe('LET and LAMBDA', () => {
+  it.each([
+    ['IFS', 'IFS(n=0, "done", TRUE, DOWN(n-1))'],
+    ['SWITCH', 'SWITCH(n, 0, "done", DOWN(n-1))'],
+    ['CHOOSE', 'CHOOSE(IF(n=0, 1, 2), "done", DOWN(n-1))'],
+    ['LET', 'LET(next, n-1, IF(n=0, "done", DOWN(next)))'],
+    ['IFERROR fallback', 'IF(n=0, "done", IFERROR(1/0, DOWN(n-1)))'],
+    ['IFNA fallback', 'IF(n=0, "done", IFNA(NA(), DOWN(n-1)))'],
+  ])('keeps tail recursion through %s independent of the native stack', (_name, body) => {
+    const wb = new Workbook();
+    wb.apply({ type: 'setName', name: 'DOWN', ref: `LAMBDA(n, ${body})` });
+    expect(wb.evaluate('=DOWN(900)')).toBe('done');
+    expect(String(wb.evaluate('=DOWN(1000)'))).toBe('#CALC!');
+    expect(wb.evaluate('=DOWN(900)')).toBe('done');
+  });
+
+  it('preserves argument values and LET bindings across tail calls', () => {
+    const wb = new Workbook();
+    wb.apply({ type: 'setName', name: 'TOTAL', ref: 'LAMBDA(n, acc, LET(next, n-1, IF(n=0, acc, TOTAL(next, acc+n))))' });
+    expect(wb.evaluate('=TOTAL(900, 7)')).toBe(405457);
+    expect(wb.evaluate('=TOTAL(3, 7)')).toBe(13);
+  });
+
+  it('trampolines mutual recursion and calls of computed LAMBDAs', () => {
+    const wb = new Workbook();
+    wb.apply({ type: 'setName', name: 'EVEN_N', ref: 'LAMBDA(n, IF(n=0, TRUE, ODD_N(n-1)))' });
+    wb.apply({ type: 'setName', name: 'ODD_N', ref: 'LAMBDA(n, IF(n=0, FALSE, EVEN_N(n-1)))' });
+    expect(wb.evaluate('=EVEN_N(900)')).toBe(true);
+    expect(wb.evaluate('=EVEN_N(899)')).toBe(false);
+    wb.apply({ type: 'setName', name: 'DOWN', ref: 'LAMBDA(n, IF(n=0, "done", LAMBDA(x, DOWN(x))(n-1)))' });
+    expect(wb.evaluate('=DOWN(450)')).toBe('done');
+    expect(String(wb.evaluate('=DOWN(500)'))).toBe('#CALC!');
+  });
+
+  it('counts nested non-tail calls and resets depth between higher-order callbacks', () => {
+    const wb = new Workbook();
+    wb.apply({ type: 'setName', name: 'ZERO', ref: 'LAMBDA(n, IF(n=0, 0, ZERO(n-1)))' });
+    wb.apply({ type: 'setName', name: 'OUTER', ref: 'LAMBDA(n, 1+ZERO(n))' });
+    expect(wb.evaluate('=OUTER(998)')).toBe(1);
+    expect(String(wb.evaluate('=OUTER(999)'))).toBe('#CALC!');
+    expect(wb.evaluate('=OUTER(998)')).toBe(1);
+    expect(wb.evaluate('=SUM(MAP({900,900}, LAMBDA(n, ZERO(n)+1)))')).toBe(2);
+    expect(wb.evaluate('=ZERO(999)')).toBe(0);
+  });
+
+  it('does not defer array branches or eager arguments', () => {
+    const wb = new Workbook();
+    expect(wb.evaluate('=SUM(LAMBDA(n, IF({TRUE,FALSE}, n+1, n+2))(10))')).toBe(23);
+    expect(wb.evaluate('=LAMBDA(n, IFERROR(n, 5))(1/0)')).toBe(5);
+    expect(wb.evaluate('=LAMBDA(n, SWITCH(n, 0, 1, ))(2)')).toBe(0);
+  });
+
   it('binds names sequentially and shadows outer names', () => {
     expect(calc('=LET(x, 2, y, x*3, x+y)')).toBe(8);
     expect(calc('=LET(x, 2, LET(x, 5, x)+x)')).toBe(7);

@@ -1,7 +1,12 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed CI Testing with Node 22
+
 ## 1.2.0
 
+- Formulas: evaluate tail-recursive LAMBDAs without growing the JavaScript stack, fixing premature #CALC! errors under Node.js 22. The logical limit of 1,000 nested LAMBDA calls still applies; regression tests cover the boundary, branching, local scopes and recovery after errors.
 - XLSX: workbooks created by Sheets remain editable after saving cell changes and reopening. Later table or structure edits no longer incorrectly trigger the XLSX preservation guard; files with unmodeled Excel content keep their existing protection.
 - Editor: route changes only to the owning XLSX or CSV editor registration, fixing "No custom document found" errors. Closing an old document no longer removes a newer instance of the same file from the live document registry.
 - Startup: recover unchanged XLSX/XLSM tabs opened as binary text before the Sheets editor was registered. Keep the editor group, preview state and focus; leave dirty tabs and explicit user/workspace editor associations alone.

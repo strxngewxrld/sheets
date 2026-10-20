@@ -106,8 +106,13 @@ describe('formula engine robustness', () => {
     wb.apply({ type: 'setName', name: 'DOWN', ref: 'LAMBDA(n, IF(n=0, "done", DOWN(n-1)))' });
     expect(String(wb.evaluate('=LOOP(1)'))).toBe('#CALC!');
     expect(wb.evaluate('=DOWN(900)')).toBe('done');
+    // The limit counts logical calls (including the final DOWN(0)), not the
+    // available JavaScript stack, which differs between Node versions and OSes.
+    expect(wb.evaluate('=DOWN(999)')).toBe('done');
+    expect(String(wb.evaluate('=DOWN(1000)'))).toBe('#CALC!');
     expect(String(wb.evaluate('=DOWN(5000)'))).toBe('#CALC!');
     // A loop after a failed one starts at depth 0 again.
     expect(wb.evaluate('=DOWN(10)')).toBe('done');
+    expect(wb.evaluate('=DOWN(999)')).toBe('done');
   });
 });

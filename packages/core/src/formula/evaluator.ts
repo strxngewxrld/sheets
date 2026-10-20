@@ -42,6 +42,8 @@ export interface EvalContext {
 
 export interface FunctionContext extends EvalContext {
   evaluate(node: Node): EvalValue;
+  /** Evaluates a final branch. Its result must be returned without further processing. */
+  evaluateTail?(node: Node, scope?: EvalContext): EvalValue;
 }
 
 /**
@@ -79,17 +81,35 @@ export function withLocals(ctx: EvalContext, bindings: Iterable<[string, EvalVal
 const MAX_LAMBDA_DEPTH = 1000;
 let lambdaDepth = 0;
 
+type LambdaCall = { fn: LambdaValue; args: EvalValue[]; ctx: EvalContext };
+type TailCall = (fn: LambdaValue, args: EvalValue[], ctx: EvalContext) => EvalValue;
+
 /** Calls a LAMBDA with already evaluated arguments. */
 export function callLambda(fn: LambdaValue, args: EvalValue[], ctx: EvalContext): EvalValue {
-  if (args.length > fn.params.length) return Err.VALUE;
-  // A RangeError is reported like a stack overflow: #CALC! "Recursion too deep".
-  if (lambdaDepth >= MAX_LAMBDA_DEPTH) throw new RangeError('LAMBDA recursion too deep');
-  const caller = Object.assign(Object.create(fn.scope) as EvalContext, { row: ctx.row, col: ctx.col });
-  lambdaDepth++;
+  const initialDepth = lambdaDepth;
+  let next: LambdaCall | undefined = { fn, args, ctx };
+  const tailCall: TailCall = (fn, args, ctx) => {
+    next = { fn, args, ctx };
+    // The enclosing final branch returns immediately. Only this loop consumes
+    // the placeholder; callers receive the eventual LAMBDA result.
+    return null;
+  };
   try {
-    return evaluate(fn.body, withLocals(caller, fn.params.map((p, i) => [p, args[i] ?? null])));
+    while (next) {
+      const call: LambdaCall = next;
+      next = undefined;
+      if (call.args.length > call.fn.params.length) return Err.VALUE;
+      // Count logical calls even when tail calls use no additional JS stack.
+      if (lambdaDepth >= MAX_LAMBDA_DEPTH) throw new RangeError('LAMBDA recursion too deep');
+      lambdaDepth++;
+      const caller = Object.assign(Object.create(call.fn.scope) as EvalContext, { row: call.ctx.row, col: call.ctx.col });
+      const scope = withLocals(caller, call.fn.params.map((p, i) => [p, call.args[i] ?? null]));
+      const result = evaluate(call.fn.body, scope, tailCall);
+      if (!next) return result;
+    }
+    return null;
   } finally {
-    lambdaDepth--;
+    lambdaDepth = initialDepth;
   }
 }
 
@@ -264,7 +284,7 @@ function binaryScalar(op: string, a: Scalar, b: Scalar): Scalar {
   }
 }
 
-export function evaluate(node: Node, ctx: EvalContext): EvalValue {
+export function evaluate(node: Node, ctx: EvalContext, tailCall?: TailCall): EvalValue {
   switch (node.type) {
     case 'number':
       return node.value;
@@ -293,7 +313,7 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
       if (local !== undefined) return local;
       const target = ctx.resolveName(node.name);
       if (!target) return Err.NAME;
-      return evaluate(target, ctx);
+      return evaluate(target, ctx, tailCall);
     }
     case 'array':
       return node.rows.map((r) => r.map((c) => toScalar(evaluate(c, ctx), ctx)));
@@ -343,7 +363,7 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
         // The callee is the first argument; anything but a LAMBDA cannot be called.
         const fn = evaluate(node.args[0]!, ctx);
         if (!isLambda(fn)) return isError(fn) ? fn : Err.VALUE;
-        return callLambda(fn, node.args.slice(1).map((a) => (a.type === 'missing' ? null : evaluate(a, ctx))), ctx);
+        return (tailCall ?? callLambda)(fn, node.args.slice(1).map((a) => (a.type === 'missing' ? null : evaluate(a, ctx))), ctx);
       }
       const def = getFunction(node.name);
       if (!def) {
@@ -352,7 +372,7 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
           return target ? evaluate(target, ctx) : undefined;
         })();
         if (!isLambda(fn)) return Err.NAME;
-        return callLambda(fn, node.args.map((a) => (a.type === 'missing' ? null : evaluate(a, ctx))), ctx);
+        return (tailCall ?? callLambda)(fn, node.args.map((a) => (a.type === 'missing' ? null : evaluate(a, ctx))), ctx);
       }
       const argc = node.args.length;
       if ((def.minArgs !== undefined && argc < def.minArgs) || (def.maxArgs !== undefined && argc > def.maxArgs)) {
@@ -360,6 +380,7 @@ export function evaluate(node: Node, ctx: EvalContext): EvalValue {
       }
       const fctx: FunctionContext = Object.assign(Object.create(ctx) as EvalContext, {
         evaluate: (n: Node) => evaluate(n, ctx),
+        evaluateTail: (n: Node, scope = ctx) => evaluate(n, scope, tailCall),
       }) as FunctionContext;
       try {
         if (def.lazy) return def.impl(node.args, fctx);
