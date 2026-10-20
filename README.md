@@ -16,7 +16,7 @@ npm run package
 Danach in VS Code **Extensions: Install from VSIX…** ausführen und `artifacts/sheets-vscode-1.2.0.vsix` auswählen. Alternativ:
 
 ```bash
-code --install-extension artifacts/sheets-vscode-1.1.0.vsix
+code --install-extension artifacts/sheets-vscode-1.2.0.vsix
 ```
 
 Voraussetzungen: VS Code 1.95 oder neuer; zum Entwickeln und Paketieren Node.js 22 oder neuer. Das Paket enthält alle Laufzeitabhängigkeiten.
