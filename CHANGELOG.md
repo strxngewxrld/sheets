@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 - XLSX: workbooks created by Sheets remain editable after saving cell changes and reopening. Later table or structure edits no longer incorrectly trigger the XLSX preservation guard; files with unmodeled Excel content keep their existing protection.
 - Editor: route changes only to the owning XLSX or CSV editor registration, fixing "No custom document found" errors. Closing an old document no longer removes a newer instance of the same file from the live document registry.

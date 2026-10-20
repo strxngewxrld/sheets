@@ -39,7 +39,12 @@ try {
     const data = await readFile(resultPath, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
     if (data) result = JSON.parse(data);
     else {
-      if (child.exitCode !== null) throw new Error(`VS Code exited before reporting results (code ${child.exitCode}). Logs: ${dir}`);
+      // With a startup file, the macOS/Linux CLI's --wait ends when that file
+      // closes, while the GUI host continues testing other documents. A clean
+      // CLI exit is not proof that the host has finished; await its report.
+      if (child.exitCode !== null && child.exitCode !== 0) {
+        throw new Error(`VS Code exited before reporting results (code ${child.exitCode}). Logs: ${dir}`);
+      }
       if (Date.now() >= deadline) throw new Error(`VS Code test timed out. Logs: ${dir}`);
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
