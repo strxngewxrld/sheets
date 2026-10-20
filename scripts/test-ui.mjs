@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { vscodeExecutable, vscodeEnvironment } from './vscode-executable.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
-const dir = await mkdtemp(join(tmpdir(), 'sheets-ui-test-'));
+const attachDir = process.env.SHEETS_UI_ATTACH_DIR;
+if (attachDir && !process.env.SHEETS_UI_DEBUG_PORT) throw Error('SHEETS_UI_DEBUG_PORT is required when attaching to an existing host');
+const dir = attachDir ?? await mkdtemp(join(tmpdir(), 'sheets-ui-test-'));
 const profile = join(dir, 'profile');
 await mkdir(join(profile, 'User'), { recursive: true });
 await writeFile(join(profile, 'User/settings.json'), JSON.stringify({
@@ -18,17 +20,17 @@ await writeFile(join(profile, 'User/settings.json'), JSON.stringify({
 }));
 const server = createServer();
 await new Promise(r => server.listen(0, '127.0.0.1', r));
-const port = server.address().port;
+const port = attachDir ? Number(process.env.SHEETS_UI_DEBUG_PORT) : server.address().port;
 await new Promise(r => server.close(r));
 console.log(`UI test artifacts: ${dir}`);
-const child = spawn(vscodeExecutable(), [
+const child = attachDir ? null : spawn(vscodeExecutable(), [
   '--user-data-dir', profile, '--extensions-dir', join(dir, 'extensions'),
   '--extensionDevelopmentPath', process.env.SHEETS_EXTENSION_PATH ?? root, '--extensionTestsPath', join(root, 'test/ui/host.cjs'),
   `--remote-debugging-port=${port}`, '--disable-extensions', '--disable-workspace-trust',
   '--skip-welcome', '--skip-release-notes', '--new-window', '--wait',
 ], { env: vscodeEnvironment({ SHEETS_UI_WORKDIR: dir }), stdio: 'ignore' });
 let spawnError;
-child.on('error', e => { spawnError = e; });
+child?.on('error', e => { spawnError = e; });
 const pause = ms => new Promise(r => setTimeout(r, ms));
 async function until(fn, timeout = 30000) {
   const deadline = Date.now() + timeout;
@@ -341,5 +343,5 @@ try {
     await host({ command: 'workbench.action.quit' }).catch(() => {});
     ws.close();
   }
-  if (child.exitCode === null) child.kill();
+  if (child?.exitCode === null) child.kill();
 }

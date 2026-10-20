@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Remote-SSH validation: the installed VSIX passes seven remote host checks and all 16 UI scenarios over a real localhost SSH connection to Windows. Add support for attaching the UI suite to an existing test host; document the verified scope in [the Remote-SSH test report](docs/remote-ssh-e2e.md).
+
 ## 1.2.1
 
 - Fixed CI Testing with Node 22
