@@ -6,3 +6,4 @@ out
 .DS_Store
 dist-types
 artifacts
+.test-tools

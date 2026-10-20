@@ -21,6 +21,11 @@ export interface FindDialog {
 }
 
 const ORDER = (wb: Workbook) => new Map(wb.sheets.map((s, i) => [s.name.toUpperCase(), i]));
+const dialogs = new WeakMap<HTMLElement, FindDialog>();
+
+export function closeFindDialog(root: HTMLElement): void {
+  dialogs.get(root)?.close();
+}
 
 /** Index of the first match after (or, backwards, before) the position. */
 export function nextMatchIndex(wb: Workbook, matches: FindResult[], from: { sheet: string; row: number; col: number }, backwards: boolean): number {
@@ -42,7 +47,7 @@ export function nextMatchIndex(wb: Workbook, matches: FindResult[], from: { shee
 
 /** Floating find/replace panel, kept open while the user works in the grid. */
 export function openFindDialog(root: HTMLElement, host: FindHost, s: Strings, replace: boolean): FindDialog {
-  root.querySelector('.sx-find-dialog')?.remove();
+  closeFindDialog(root);
   const form = document.createElement('form');
   form.className = 'sx-dialog sx-find-dialog';
   form.setAttribute('role', 'dialog');
@@ -125,7 +130,11 @@ export function openFindDialog(root: HTMLElement, host: FindHost, s: Strings, re
   const update = () => {
     const text = !query.value ? '' : !matches.length ? s.noMatches : index >= 0 ? s.matchCount.replace('{0}', String(index + 1)).replace('{1}', String(matches.length)) : String(matches.length);
     status.textContent = [message, text].filter(Boolean).join(' · ');
-    for (const b of [replaceOne, replaceEvery]) b.disabled = host.readOnly || !matches.length;
+    for (const b of [replaceOne, replaceEvery]) {
+      const losesFocus = document.activeElement === b && (host.readOnly || !matches.length);
+      b.disabled = host.readOnly || !matches.length;
+      if (losesFocus) query.focus();
+    }
   };
   const go = (backwards: boolean) => {
     search();
@@ -209,10 +218,12 @@ export function openFindDialog(root: HTMLElement, host: FindHost, s: Strings, re
     close() {
       if (!form.isConnected) return;
       form.remove();
+      dialogs.delete(root);
       host.onClose();
     },
   };
   root.append(form);
+  dialogs.set(root, dialog);
   dialog.setReplace(replace);
   update();
   return dialog;

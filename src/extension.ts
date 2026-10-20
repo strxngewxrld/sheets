@@ -10,6 +10,7 @@ import { decodeBytes } from './binary.js';
 import type { CsvExport } from './protocol.js';
 import { checkForUpdates, downloadVsix } from './update-check.js';
 import { resolveFileUri } from './file-uri.js';
+import { reopenStartupSpreadsheets } from './startup-editors.js';
 
 export interface SheetsApi {
   /** Tool definitions (name, description, JSON schema). */
@@ -65,6 +66,7 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
   );
 
   registerCopilotTools(context, executeTool, () => provider.activeDocument?.uri.path.split('/').pop());
+  void reopenStartupSpreadsheets().catch(error => console.error('Sheets: reopening a startup spreadsheet failed', error));
   void startUpdateCheck(context).catch(() => undefined);
 
   return { tools: TOOL_DEFINITIONS, executeTool };

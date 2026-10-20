@@ -30,8 +30,9 @@ exports.run = async () => {
     const c = JSON.parse(raw);
     try {
       let result;
-      if (c.config) await vscode.workspace.getConfiguration().update(c.config, c.value, vscode.ConfigurationTarget.Global);
-      else if (c.open) await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(path.join(dir, c.open)), c.editor ?? 'sheets.spreadsheet');
+      if (c.state) result = vscode.window.tabGroups.all.flatMap(g => g.tabs.map(t => ({ label: t.label, dirty: t.isDirty, active: t.isActive })));
+      else if (c.config) await vscode.workspace.getConfiguration().update(c.config, c.value, vscode.ConfigurationTarget.Global);
+      else if (c.open) await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(path.join(dir, c.open)), c.editor ?? 'sheets.spreadsheet', { preview: false });
       else if (c.tool) result = await api.executeTool(c.tool, c.input ?? {}, file);
       else result = await vscode.commands.executeCommand(c.command, ...(c.args ?? []));
       fs.writeFileSync(path.join(dir, 'response.json'), JSON.stringify({ id: c.id, result }));

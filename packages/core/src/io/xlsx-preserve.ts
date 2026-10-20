@@ -536,13 +536,18 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
   const appended = current.sheets.length >= baseline.sheets.length && baseline.sheets.every((sheet, i) => current.sheets[i]!.name === sheet.name)
     ? current.sheets.slice(baseline.sheets.length) : undefined;
   const nonCellChanges = !appended || !sameValue(metadata(current, baseline.sheets.length), metadata(baseline)) || !appended.every(isPlainNewSheet);
-  if (source.structuralEdits || nonCellChanges) {
-    const generatedBaseline = unzipSync(fresh(baseline));
-    if (!equivalentPackage(files, generatedBaseline) || !understandsFormulas(baseline)) protect('Struktur-, Tabellen-, Diagramm- oder Regeländerung mit nicht vollständig modellierten Excel-Inhalten.', 'Structure, table, chart or rule change in a file with Excel content that is not fully modeled.');
+  // Keep serializer-owned files canonical even for cell-only edits. Patching
+  // their cells in place can introduce inline strings or unused shared strings,
+  // causing the next reopen to reject an otherwise safe table/structure edit.
+  const generatedBaseline = unzipSync(fresh(baseline));
+  if (equivalentPackage(files, generatedBaseline) && understandsFormulas(baseline)) {
     const generated = unzipSync(fresh());
     // Keep original document properties, including creation times, on a safe rebuild.
     for (const name of Object.keys(files)) if (name.startsWith('docProps/')) generated[name] = files[name]!;
     return zipSync(generated, { level: compression });
+  }
+  if (source.structuralEdits || nonCellChanges) {
+    protect('Struktur-, Tabellen-, Diagramm- oder Regeländerung mit nicht vollständig modellierten Excel-Inhalten.', 'Structure, table, chart or rule change in a file with Excel content that is not fully modeled.');
   }
   if (worksheets.length !== baseline.sheets.length) protect('Nicht übereinstimmende Blattzuordnung.', 'Sheet mapping does not match.');
   const stylesPath = wbRels.find((r) => r.type.endsWith('/styles'))?.target;

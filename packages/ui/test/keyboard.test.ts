@@ -5,6 +5,7 @@ import { SpreadsheetView } from '../src/view.js';
 function key(event: Partial<KeyboardEvent>) {
   const view = Object.assign(Object.create(SpreadsheetView.prototype), {
     editor: { editing: false }, openFind: vi.fn(), pasteSpecial: vi.fn(),
+    options: { keyboardUndo: false },
   });
   const preventDefault = vi.fn();
   view.onKeyDown({ ctrlKey: false, metaKey: false, shiftKey: false, altKey: false,
@@ -33,5 +34,16 @@ describe('cross-platform keyboard input', () => {
   it('retains Cmd+Option+F and Ctrl+Alt+V', () => {
     expect(key({ metaKey: true, altKey: true, code: 'KeyF' }).view.openFind).toHaveBeenCalledWith(true);
     expect(key({ ctrlKey: true, altKey: true, code: 'KeyV' }).view.pasteSpecial).toHaveBeenCalled();
+  });
+
+  it.each([
+    { ctrlKey: true, key: 'z' },
+    { ctrlKey: true, key: 'y' },
+    { ctrlKey: true, shiftKey: true, key: 'z' },
+    { metaKey: true, key: 'z' },
+    { metaKey: true, shiftKey: true, key: 'z' },
+    { metaKey: true, key: 'y' },
+  ])('leaves host undo/redo to VS Code for %o', event => {
+    expect(key(event).preventDefault).not.toHaveBeenCalled();
   });
 });

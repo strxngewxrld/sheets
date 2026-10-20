@@ -4,6 +4,19 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { applyStyle, formatTable, readXlsx, setCellInput, setValues, sortRange, toRange, Workbook, writeXlsx, xlsxToData } from '../src/index.js';
 
 const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+it('allows table edits after saving and reopening cell edits in a generated workbook', () => {
+  const original = new Workbook();
+  setValues(original, 0, 0, 0, [['Name', 'Amount'], ['Original', 10], ['Other', '=B2*2']]);
+  const edited = readXlsx(writeXlsx(original));
+  setCellInput(edited, 0, 1, 9, 'Windows Grüße € @');
+  const reopened = readXlsx(writeXlsx(edited));
+  formatTable(reopened, 0, toRange('A1:B3'));
+  const saved = readXlsx(writeXlsx(reopened));
+  expect(saved.activeSheet.tables).toHaveLength(1);
+  expect(saved.getValue(0, 1, 9)).toBe('Windows Grüße € @');
+  expect(saved.getValue(0, 2, 1)).toBe(20);
+});
+
 function fixture() {
   const wb = new Workbook();
   setValues(wb, 0, 0, 0, [['Name', 'Amount'], ['Original', 10], ['Untouched', '=B2*2']]);

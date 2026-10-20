@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
-import { vscodeExecutable } from './vscode-executable.mjs';
+import { vscodeExecutable, vscodeEnvironment } from './vscode-executable.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), 'sheets-ui-test-'));
 const profile = join(dir, 'profile');
@@ -23,10 +23,10 @@ await new Promise(r => server.close(r));
 console.log(`UI test artifacts: ${dir}`);
 const child = spawn(vscodeExecutable(), [
   '--user-data-dir', profile, '--extensions-dir', join(dir, 'extensions'),
-  '--extensionDevelopmentPath', root, '--extensionTestsPath', join(root, 'test/ui/host.cjs'),
+  '--extensionDevelopmentPath', process.env.SHEETS_EXTENSION_PATH ?? root, '--extensionTestsPath', join(root, 'test/ui/host.cjs'),
   `--remote-debugging-port=${port}`, '--disable-extensions', '--disable-workspace-trust',
   '--skip-welcome', '--skip-release-notes', '--new-window', '--wait',
-], { env: { ...process.env, SHEETS_UI_WORKDIR: dir }, stdio: 'ignore' });
+], { env: vscodeEnvironment({ SHEETS_UI_WORKDIR: dir }), stdio: 'ignore' });
 let spawnError;
 child.on('error', e => { spawnError = e; });
 const pause = ms => new Promise(r => setTimeout(r, ms));
@@ -40,7 +40,7 @@ async function until(fn, timeout = 30000) {
   }
   throw error ?? Error('UI wait timed out');
 }
-let ws, sessionId, sequence = 0;
+let ws, sessionId, targetId, sequence = 0;
 const pending = new Map(), contexts = [], exceptions = [], checks = [];
 async function call(method, params = {}, session = sessionId) {
   const id = ++sequence;
@@ -56,6 +56,7 @@ async function attach() {
   const targets = await call('Target.getTargets');
   const frame = targets.targetInfos.find(t => t.type === 'iframe' && t.url.includes('Tom-Knueppel.sheets-vscode'));
   if (!frame) return false;
+  targetId = frame.targetId;
   sessionId = (await call('Target.attachToTarget', { targetId: frame.targetId, flatten: true })).sessionId;
   await call('Runtime.enable');
   for (const context of contexts) {
@@ -90,6 +91,11 @@ async function shot(name) {
   const result = await call('Page.captureScreenshot', { format: 'png' }, null);
   await writeFile(join(dir, name + '.png'), Buffer.from(result.data, 'base64'));
 }
+async function closeEditors() {
+  const previous = targetId;
+  await host({ command: 'workbench.action.closeAllEditors' });
+  await until(async () => !(await call('Target.getTargets', {}, null)).targetInfos.some(t => t.targetId === previous));
+}
 async function check(name, fn) { await fn(); checks.push(name); console.log(`PASS ${name}`); }
 const click = title => evaluate(`{const b=document.querySelector('button[title=${JSON.stringify(title)}]');b.focus();b.click();}`);
 const escape = () => evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
@@ -110,17 +116,58 @@ try {
     await select('A2'); assert.equal(await evaluate(`document.querySelector('.sx-formula').value`), 'Müller & Söhne');
     await select('E2'); assert.equal(await evaluate(`document.querySelector('.sx-formula').value`), '=C2*D2');
   });
+  if (process.platform === 'win32') await check('Windows native text input, Ctrl+Z, Ctrl+Y, Ctrl+F and Ctrl+S', async () => {
+    const key = async (key, code, virtual, modifiers = 0) => {
+      const params = { key, code, windowsVirtualKeyCode: virtual, modifiers };
+      await call('Input.dispatchKeyEvent', { ...params, type: 'keyDown' }, null);
+      await call('Input.dispatchKeyEvent', { ...params, type: 'keyUp' }, null);
+    };
+    await select('J2');
+    await evaluate(`document.querySelector('.sx-editor').focus()`);
+    await call('Input.insertText', { text: 'Windows Grüße € @' }, null);
+    await key('Enter', 'Enter', 13);
+    await until(async () => JSON.stringify(await host({ tool: 'read_range', input: { range: 'J2' } })).includes('Windows Grüße'));
+    await key('z', 'KeyZ', 90, 2);
+    await until(async () => !JSON.stringify(await host({ tool: 'read_range', input: { range: 'J2' } })).includes('Windows Grüße'));
+    await key('y', 'KeyY', 89, 2);
+    await until(async () => JSON.stringify(await host({ tool: 'read_range', input: { range: 'J2' } })).includes('Windows Grüße'));
+    await key('f', 'KeyF', 70, 2);
+    await until(() => evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`));
+    await key('Escape', 'Escape', 27);
+    await until(async () => !await evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`));
+    await key('s', 'KeyS', 83, 2);
+    await until(async () => (await host({ state: true })).every(tab => !tab.dirty));
+    await closeEditors();
+    await host({ open: 'ui.xlsx' }); contextId = await until(attach);
+    await select('J2');
+    assert.equal(await evaluate(`document.querySelector('.sx-formula').value`), 'Windows Grüße € @');
+    await host({ tool: 'clear_range', input: { range: 'J2', mode: 'contents' } });
+    await select('A1');
+  });
   await check('Find, invalid regex, replace and undo through the live host', async () => {
     await host({ command: 'sheets.replace' });
     await until(() => evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`));
     await evaluate(`{const q=document.querySelector('[aria-label="Find"]');q.value='Müller';q.dispatchEvent(new Event('input',{bubbles:true}));}`);
     assert.match(await evaluate(`document.querySelector('.sx-find-status').textContent`), /1/);
-    await evaluate(`{const q=document.querySelector('[aria-label="Replace with"]');q.value='Meier';q.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('.sx-find-dialog button')].find(b=>b.textContent==='Replace all').click();}`);
+    await evaluate(`{const q=document.querySelector('[aria-label="Replace with"]');q.value='Meier';q.dispatchEvent(new Event('input',{bubbles:true}));const b=[...document.querySelectorAll('.sx-find-dialog button')].find(b=>b.textContent==='Replace all');b.focus();b.click();}`);
+    assert.equal(await evaluate(`document.activeElement.getAttribute('aria-label')`), 'Find');
     assert.match(JSON.stringify(await host({ tool: 'read_range', input: { range: 'A2' } })), /Meier/);
     await host({ command: 'undo' });
     assert.match(JSON.stringify(await host({ tool: 'read_range', input: { range: 'A2' } })), /Müller/);
     await evaluate(`{const q=document.querySelector('[aria-label="Find"]');q.value='[';document.querySelectorAll('.sx-find-dialog input[type=checkbox]')[3].click();q.dispatchEvent(new Event('input',{bubbles:true}));}`);
     assert.equal(await evaluate(`document.querySelector('[aria-label="Find"]').getAttribute('aria-invalid')`), 'true');
+    await escape();
+    assert.equal(await evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`), false);
+  });
+  await check('Find and format dialogs replace each other without overlapping', async () => {
+    await host({ command: 'sheets.find' });
+    await until(() => evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`));
+    await click('Format cells…');
+    assert.equal(await evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`), false);
+    assert.equal(await evaluate(`document.querySelectorAll('.sx-dialog').length`), 1);
+    await host({ command: 'sheets.find' });
+    await until(() => evaluate(`Boolean(document.querySelector('.sx-find-dialog'))`));
+    assert.equal(await evaluate(`document.querySelectorAll('.sx-dialog').length`), 1);
     await escape();
   });
   await check('Grid editing, formulas, rectangular paste, undo and redo', async () => {
@@ -148,7 +195,7 @@ try {
     await host({command:'undo'});
   });
   await check('Context menu stays inside a small editor and scrolls to the last action', async () => {
-    const result = await evaluate(`{const root=document.querySelector('.sx-root');root.style.width='480px';root.style.height='320px';document.querySelector('.sx-grid').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:460,clientY:300}));const m=document.querySelector('.sx-menu'),r=m.getBoundingClientRect();JSON.stringify({left:r.left,top:r.top,right:r.right,bottom:r.bottom,scroll:m.scrollHeight>m.clientHeight})}`);
+    const result = await evaluate(`{const root=document.querySelector('.sx-root');root.style.width='480px';root.style.height='320px';document.querySelector('.sx-grid').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:460,clientY:300}));const m=document.querySelector('.sx-menu'),r=m.getBoundingClientRect();JSON.stringify({left:r.left,top:r.top,right:r.right,bottom:r.bottom,scroll:m.scrollHeight>m.clientHeight})}`);
     const r = JSON.parse(result); assert(r.left >= 0 && r.top >= 0 && r.right <= 480 && r.bottom <= 320); assert(r.scroll);
     await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));for(let i=0;i<12;i++)document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));`);
     assert.equal(await evaluate(`document.activeElement.textContent`), 'Hide columns');
@@ -219,8 +266,10 @@ try {
     assert.match(JSON.stringify(await host({ tool: 'list_tables' })), /Table1/);
     const values = await host({ tool: 'read_range', input: { range: 'E2:E6' } });
     assert.match(JSON.stringify(values), /557.42/);
+    await host({ command: 'workbench.action.focusActiveEditorGroup' });
     await host({ command: 'workbench.action.files.save' });
-    await host({ command: 'workbench.action.closeAllEditors' });
+    await until(async () => (await host({ state: true })).every(tab => !tab.dirty));
+    await closeEditors();
     await host({ open: 'ui.xlsx' }); contextId = await until(attach);
     assert.match(JSON.stringify(await host({ tool: 'list_tables' })), /Table1/);
     await shot('light-table');
@@ -273,7 +322,7 @@ try {
   });
   await check('CSV opens in Sheets, edits and saves without changing delimiter or CRLF', async () => {
     await writeFile(join(dir, 'sample.csv'), 'Name;Wert\r\nMüller;1,5\r\nB;2');
-    await host({ command: 'workbench.action.closeAllEditors' });
+    await closeEditors();
     await host({ open: 'sample.csv', editor: 'sheets.csv' }); contextId = await until(attach);
     await select('B3');
     await evaluate(`{const f=document.querySelector('.sx-formula');f.focus();f.value='3';f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));}`);

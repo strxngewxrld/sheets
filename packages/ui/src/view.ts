@@ -232,6 +232,8 @@ export class SpreadsheetView {
   openFind(replace = false): void {
     if (this.editor.editing) this.commitEdit();
     closeMenu();
+    closeAnalysisDialog(this.root);
+    this.charts.closeEditor();
     if (this.findDialog?.element.isConnected) {
       this.findDialog.setReplace(replace);
       return;

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- XLSX: workbooks created by Sheets remain editable after saving cell changes and reopening. Later table or structure edits no longer incorrectly trigger the XLSX preservation guard; files with unmodeled Excel content keep their existing protection.
+- Editor: route changes only to the owning XLSX or CSV editor registration, fixing "No custom document found" errors. Closing an old document no longer removes a newer instance of the same file from the live document registry.
+- Startup: recover unchanged XLSX/XLSM tabs opened as binary text before the Sheets editor was registered. Keep the editor group, preview state and focus; leave dirty tabs and explicit user/workspace editor associations alone.
+- Find and replace: restore focus to the search field when replacing the last match disables the clicked button, so Escape still closes the panel. Search and format/analysis dialogs now replace one another instead of overlapping.
+- Tests: prevent inherited Electron Node mode from breaking VS Code test startup; retain test reports and allow testing an installed VSIX. Add coverage for XLSX cold starts, save/reopen sequences, dialog focus, editor lifecycle, Windows Ctrl and macOS Cmd undo/redo, and macOS file paths.
+- Validation: Windows MCP walkthrough covers native file dialogs, clipboard, workbook creation, formatting, find/replace and CSV export. The installed VSIX passes 10 host and 16 UI scenarios; all 843 automated tests pass. The shared changes still require a fresh macOS desktop E2E run; see [the Windows test report](docs/windows-e2e.md) for scope and limitations.
+
 ## 1.1.0
 
 - XLSX: sorting can now be saved in files with Excel content Sheets does not model, when the result is exact (cells take the original format records along; notes, hyperlinks, native tables, validation, merged cells and formulas referring to other rows stay blocked).

@@ -46,6 +46,7 @@ export async function checkPackage(path) {
     LanguageModelTextPart: class { constructor(value) { this.value = value; } },
     LanguageModelToolResult: class { constructor(content) { this.content = content; } },
     window: {
+      tabGroups: { all: [] },
       registerCustomEditorProvider(name, provider) { providers.set(name, provider); return disposable(); },
       showErrorMessage() {},
     },

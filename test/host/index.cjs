@@ -14,13 +14,21 @@ exports.run = async () => {
     const extension = vscode.extensions.getExtension('Tom-Knueppel.sheets-vscode');
     assert(extension, 'Sheets extension is missing');
     const api = await extension.activate();
+    const startupDeadline = Date.now() + 15_000;
+    while (!(vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputCustom) && Date.now() < startupDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const startupTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    assert(startupTab?.input instanceof vscode.TabInputCustom && startupTab.input.viewType === 'sheets.spreadsheet',
+      `Startup XLSX did not select Sheets: ${JSON.stringify({ input: startupTab?.input, associations: vscode.workspace.getConfiguration('workbench').inspect('editorAssociations') })}`);
+    checks.push('an XLSX passed on the command line opens directly in Sheets at startup');
     const expected = extension.packageJSON.contributes.languageModelTools;
     const available = new Set(vscode.lm.tools.map((tool) => tool.name));
     for (const tool of expected) assert(available.has(tool.name), `Tool not visible in VS Code registry: ${tool.name}`);
     checks.push(`${expected.length} tools visible to the VS Code LM API`);
 
     // This fixture is created only inside the isolated test directory.
-    const file = path.join(process.env.SHEETS_HOST_WORKDIR, 'migration.xlsx');
+    const file = path.join(process.env.SHEETS_HOST_WORKDIR, 'Migration Grüße #100%.xlsx');
     const created = await api.executeTool('write_range', {
       start: 'A1', parse: false, values: [['Legacy No.', 'Country', 'Amount'], ['0004711', 'DE', 12.5], ['0004712', 'AT', 20]],
     }, file);
@@ -38,6 +46,8 @@ exports.run = async () => {
     };
     assert.match(await invoke('sheets_read_range', { file, range: 'A1:C3' }), /0004711/);
     checks.push('lm.invokeTool reads unopened XLSX without losing leading zeroes');
+    assert.match(await invoke('sheets_read_range', { file: vscode.Uri.file(file).toString(), range: 'A1:C3' }), /0004711/);
+    checks.push('native paths and escaped file URIs handle spaces, Unicode, # and %');
 
     // An agent edit of an unopened CSV must keep everything but the edited value:
     // delimiter, decimal comma, CRLF, missing final line break and the Windows-1252 umlaut.

@@ -1,5 +1,6 @@
 import { applyStyle, clearRange, colToName, createPivotTable, formatAddress, formatRange, formatTable, formatValue, LOCALE_DE, MAX_COLS, parseRange, removeTable, setConditionalFormats, sortRange, tableAt, TABLE_THEMES, type ConditionalFormatRule, type ConditionalOperator, type FormatLocale, type PivotAggregate, type RangeAddress, type PasteSpecial, type SortKey, hasFormulas, ICON_SETS, type IconSetName, type StylePatch, type Workbook, applyDataValidation, parseInput, validationAt, type DataValidation, type ValidationOperator, type ValidationType } from '@sheets/core';
 import { conditionalRuleLabel } from './rule-text.js';
+import { closeFindDialog } from './find-dialog.js';
 import type { Strings } from './i18n.js';
 import { setTableFilter, tableFilterValue, type SheetTable } from '@sheets/core';
 
@@ -122,6 +123,7 @@ export function closeAnalysisDialog(root: HTMLElement): void {
 }
 
 function panel(root: HTMLElement, title: string, s: Strings, onClose: () => void) {
+  closeFindDialog(root);
   closeAnalysisDialog(root);
   const dialog = document.createElement('form');
   dialog.className = 'sx-dialog sx-analysis-dialog';

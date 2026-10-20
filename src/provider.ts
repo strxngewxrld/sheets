@@ -99,8 +99,28 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
   static register(context: vscode.ExtensionContext): SpreadsheetEditorProvider {
     const provider = new SpreadsheetEditorProvider(context);
     for (const viewType of SpreadsheetEditorProvider.viewTypes) {
+      // VS Code subscribes separately for each view type. Broadcasting every edit
+      // to both registrations makes the other one report "No custom document found".
+      const documents = new WeakSet<SpreadsheetDocument>();
+      const onDidChangeCustomDocument: vscode.Event<vscode.CustomDocumentEditEvent<SpreadsheetDocument>> =
+        (listener, thisArgs, disposables) => provider.onDidChangeCustomDocument((event) => {
+          if (documents.has(event.document)) listener.call(thisArgs, event);
+        }, undefined, disposables);
+      const editor: vscode.CustomEditorProvider<SpreadsheetDocument> = {
+        onDidChangeCustomDocument,
+        openCustomDocument: async (uri, openContext) => {
+          const document = await provider.openCustomDocument(uri, openContext);
+          documents.add(document);
+          return document;
+        },
+        resolveCustomEditor: provider.resolveCustomEditor.bind(provider),
+        saveCustomDocument: provider.saveCustomDocument.bind(provider),
+        saveCustomDocumentAs: provider.saveCustomDocumentAs.bind(provider),
+        revertCustomDocument: provider.revertCustomDocument.bind(provider),
+        backupCustomDocument: provider.backupCustomDocument.bind(provider),
+      };
       context.subscriptions.push(
-        vscode.window.registerCustomEditorProvider(viewType, provider, {
+        vscode.window.registerCustomEditorProvider(viewType, editor, {
           webviewOptions: { retainContextWhenHidden: true },
           supportsMultipleEditorsPerDocument: false,
         }),
@@ -123,7 +143,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     }
     this.documents.set(uri.toString(), doc);
     doc.onDidDispose(() => {
-      this.documents.delete(uri.toString());
+      if (this.documents.get(uri.toString()) === doc) this.documents.delete(uri.toString());
       if (this.activeDocument === doc) this.activeDocument = undefined;
     });
     return doc;
