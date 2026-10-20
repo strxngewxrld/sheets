@@ -13,7 +13,7 @@ npm ci
 npm run package
 ```
 
-Danach in VS Code **Extensions: Install from VSIX…** ausführen und `artifacts/sheets-vscode-1.1.0.vsix` auswählen. Alternativ:
+Danach in VS Code **Extensions: Install from VSIX…** ausführen und `artifacts/sheets-vscode-1.2.0.vsix` auswählen. Alternativ:
 
 ```bash
 code --install-extension artifacts/sheets-vscode-1.1.0.vsix
