@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.2.2
+
+- Documentation: add English and German READMEs and user manuals with Windows MCP screenshots and a sample CSV. Add a localized VS Code Getting Started walkthrough, plus commands to reopen it and read the bundled manual.
 
 - Remote-SSH validation: the installed VSIX passes seven remote host checks and all 16 UI scenarios over a real localhost SSH connection to Windows. Add support for attaching the UI suite to an existing test host; document the verified scope in [the Remote-SSH test report](docs/remote-ssh-e2e.md).
 

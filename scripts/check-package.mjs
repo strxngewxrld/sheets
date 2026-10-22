@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, posix } from 'node:path';
 import { unzipSync, strFromU8, strToU8, zipSync } from 'fflate';
 import { runInNewContext } from 'node:vm';
 import { createRequire, isBuiltin } from 'node:module';
@@ -17,6 +17,28 @@ export async function checkPackage(path) {
   assert(!names.some((n) => /(?:\/node_modules\/|\/src\/|\/test\/|\.map$|\.ts$|\.vsix$)/.test(n)), 'Package contains development files');
   assert.equal(pkg.main, './dist/extension.js');
   assert(files['extension/THIRD_PARTY_NOTICES.md'], 'Missing bundled dependency licenses');
+  for (const name of ['README.de.md', 'docs/manual.en.md', 'docs/manual.de.md', 'docs/examples/getting-started.csv']) {
+    assert(names.some(n => n.toLowerCase() === `extension/${name}`.toLowerCase()), `Missing bundled documentation: ${name}`);
+  }
+  for (const name of ['docs/manual.en.md', 'docs/manual.de.md']) {
+    const markdown = strFromU8(files[`extension/${name}`]);
+    for (const [, link] of markdown.matchAll(/\]\(([^)]+)\)/g)) {
+      if (/^(?:https?:|#)/.test(link)) continue;
+      const target = posix.normalize(posix.join(posix.dirname(name), link.split('#')[0]));
+      assert(names.some(n => n.toLowerCase() === `extension/${target}`.toLowerCase()), `Broken packaged manual link: ${name} -> ${link}`);
+    }
+  }
+  const walkthrough = pkg.contributes.walkthroughs.find(item => item.id === 'sheets.gettingStarted');
+  assert(walkthrough?.steps.length >= 5, 'Missing Getting Started walkthrough steps');
+  const contributedCommands = new Set(pkg.contributes.commands.map(item => item.command));
+  const translations = json('package.nls.json');
+  for (const step of walkthrough.steps) {
+    assert(files[`extension/${step.media.image}`], `Missing walkthrough image: ${step.media.image}`);
+    const description = translations[step.description.slice(1, -1)] ?? step.description;
+    for (const [, command] of description.matchAll(/\]\(command:([\w.]+)\)/g)) {
+      assert(contributedCommands.has(command), `Unknown walkthrough command: ${command}`);
+    }
+  }
   assert.equal(pkg.name, 'sheets-vscode');
   // The extension ID (publisher.name) is used by the VS Code host test.
   assert.equal(pkg.publisher, 'Tom-Knueppel');

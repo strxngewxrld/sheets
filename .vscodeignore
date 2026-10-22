@@ -3,6 +3,7 @@
 !package.nls.json
 !package.nls.de.json
 !README.md
+!README.de.md
 !CHANGELOG.md
 !LICENSE
 !THIRD_PARTY_NOTICES.md
@@ -11,3 +12,9 @@
 !media/icon.png
 !media/preview.png
 !docs/xlsx-compatibility.md
+!DEVELOPMENT.md
+!docs/copilot.md
+!docs/manual.en.md
+!docs/manual.de.md
+!docs/images/*.png
+!docs/examples/getting-started.csv

@@ -16,5 +16,21 @@
   "command.zoomOut": "Verkleinern",
   "command.zoomReset": "Zoom zurücksetzen",
   "command.exportCsv": "Blatt als CSV exportieren…",
-  "configuration.checkForUpdates": "Beim Start von VS Code in den GitHub Releases nach einer neueren Version von Sheets suchen."
+  "configuration.checkForUpdates": "Beim Start von VS Code in den GitHub Releases nach einer neueren Version von Sheets suchen.",
+  "command.gettingStarted": "Erste Schritte",
+  "command.openManual": "Handbuch öffnen",
+  "walkthrough.title": "Erste Schritte mit Sheets",
+  "walkthrough.description": "Eine Tabelle öffnen, eine Formel ausprobieren, Werte suchen und die Arbeit speichern.",
+  "walkthrough.open.title": "Arbeitsmappe öffnen oder erstellen",
+  "walkthrough.open.description": "XLSX und XLSM öffnen sich standardmäßig in Sheets. Für CSV/TSV im Explorer-Kontextmenü **Mit Sheets öffnen** wählen.\n[Tabellendatei öffnen](command:sheets.openFile)\n[Neue XLSX-Arbeitsmappe](command:sheets.newWorkbook)",
+  "walkthrough.edit.title": "Werte und Formeln eingeben",
+  "walkthrough.edit.description": "A1 auswählen, `10` eingeben und Enter drücken. In A2 `20` und in A3 `=SUM(A1:A2)` eingeben: Das Ergebnis ist **30**. Auch in der deutschen Oberfläche englische Funktionsnamen und Kommas verwenden. Zellen per Doppelklick bearbeiten und die Auswahl über die Werkzeugleiste formatieren. Anschließend den nächsten Schritt auswählen.",
+  "walkthrough.find.title": "Daten suchen",
+  "walkthrough.find.description": "Eine Tabelle geöffnet lassen und die Suche über die Schaltfläche starten. In Werten oder Formeln suchen, das Blatt oder die ganze Mappe als Suchbereich wählen und mit Escape zur Tabelle zurückkehren.\n[Suche öffnen](command:sheets.find)",
+  "walkthrough.save.title": "Speichern oder exportieren",
+  "walkthrough.save.description": "Zur Tabelle wechseln und mit **Strg+S** (macOS: **Cmd+S**) speichern. Für eine separate CSV-/TSV-Kopie **Sheets: Blatt als CSV exportieren…** in der Befehlspalette ausführen. CSV speichert nur die Werte eines Blatts. Bei einer XLSX-Schutzmeldung die nicht unterstützte Änderung vor dem Speichern rückgängig machen. Anschließend den nächsten Schritt auswählen.",
+  "walkthrough.manual.title": "Das Handbuch entdecken",
+  "walkthrough.manual.description": "Anleitungen zu Tabellen, Filtern, Diagrammen, Datenüberprüfung, KI-Werkzeugen und Fehlerbehebung lesen. Das Handbuch öffnet sich passend zur VS-Code-Sprache und verlinkt die andere Sprache.\n[Handbuch öffnen](command:sheets.openManual)",
+  "walkthrough.editor.alt": "Sheets-Editor mit einer Umsatz-Arbeitsmappe, Formeln und Formatierung.",
+  "walkthrough.find.alt": "Suchbereich im Sheets-Tabelleneditor."
 }

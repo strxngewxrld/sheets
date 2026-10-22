@@ -29,6 +29,13 @@ export function activate(context: vscode.ExtensionContext): SheetsApi {
   provider = SpreadsheetEditorProvider.register(context);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('sheets.gettingStarted', () =>
+      vscode.commands.executeCommand('workbench.action.openWalkthrough', `${context.extension.id}#sheets.gettingStarted`, false),
+    ),
+    vscode.commands.registerCommand('sheets.openManual', () => {
+      const file = vscode.env.language.toLowerCase().startsWith('de') ? 'manual.de.md' : 'manual.en.md';
+      return vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.joinPath(context.extensionUri, 'docs', file));
+    }),
     vscode.commands.registerCommand('sheets.openFile', async () => {
       const selected = await vscode.window.showOpenDialog({
         canSelectMany: false,

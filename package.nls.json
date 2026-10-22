@@ -16,5 +16,21 @@
   "command.zoomOut": "Zoom Out",
   "command.zoomReset": "Reset Zoom",
   "command.exportCsv": "Export Sheet as CSV…",
-  "configuration.checkForUpdates": "Check GitHub Releases for a newer version of Sheets when VS Code starts."
+  "configuration.checkForUpdates": "Check GitHub Releases for a newer version of Sheets when VS Code starts.",
+  "command.gettingStarted": "Getting Started",
+  "command.openManual": "Open User Manual",
+  "walkthrough.title": "Get started with Sheets",
+  "walkthrough.description": "Open a spreadsheet, try a formula, find values and save your work.",
+  "walkthrough.open.title": "Open or create a workbook",
+  "walkthrough.open.description": "XLSX and XLSM files open in Sheets by default. For CSV/TSV, use **Open with Sheets** in the Explorer context menu.\n[Open a spreadsheet](command:sheets.openFile)\n[Create an XLSX workbook](command:sheets.newWorkbook)",
+  "walkthrough.edit.title": "Enter values and formulas",
+  "walkthrough.edit.description": "Select A1, type `10` and press Enter. Enter `20` in A2, then `=SUM(A1:A2)` in A3: the result is **30**. Use English function names and commas, also in the German UI. Double-click a cell to edit it; use the toolbar to format the selection. Continue by selecting the next step.",
+  "walkthrough.find.title": "Find your data",
+  "walkthrough.find.description": "Keep a spreadsheet open and use the button below to open Find. Search values or formulas, choose the sheet or workbook scope, and press Escape to return to the grid.\n[Open Find](command:sheets.find)",
+  "walkthrough.save.title": "Save or export",
+  "walkthrough.save.description": "Return to your spreadsheet and press **Ctrl+S** (macOS: **Cmd+S**) to save. For a separate CSV/TSV copy, run **Sheets: Export Sheet as CSV…** in the Command Palette. CSV stores only values from one sheet. If an XLSX protection message appears, undo the unsupported change before saving. Continue by selecting the next step.",
+  "walkthrough.manual.title": "Explore the user manual",
+  "walkthrough.manual.description": "Find step-by-step instructions for tables, filters, charts, validation, AI tools and troubleshooting. The manual opens in your VS Code language, with a link to the other language.\n[Open user manual](command:sheets.openManual)",
+  "walkthrough.editor.alt": "Sheets editor showing a sales workbook with formulas and formatting.",
+  "walkthrough.find.alt": "Find panel in the Sheets spreadsheet editor."
 }

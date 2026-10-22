@@ -1,74 +1,55 @@
 # Sheets – Excel & CSV Editor
 
-Excel- und CSV-Dateien direkt in Visual Studio Code öffnen und bearbeiten. Sheets bringt einen Tabelleneditor mit Formeln, Formatierung, Filtern und Diagrammen mit. Microsoft Excel oder ein externer Dienst sind dafür nicht erforderlich.
+[Deutsch](README.de.md) · [User manual](docs/manual.en.md) · [Handbuch](docs/manual.de.md)
 
-![Sheets Tabelleneditor mit Tabellenformatierung und Diagramm](media/preview.png)
+Open and edit Excel and CSV files directly in Visual Studio Code. Sheets provides formulas, formatting, table filters and charts without requiring Microsoft Excel. Spreadsheet processing runs locally.
+
+![Sheets spreadsheet editor](docs/images/editor.png)
 
 ## Installation
 
-Die Extension lässt sich als VSIX aus diesem Repository bauen:
+Download a VSIX from [GitHub Releases](https://github.com/strxngewxrld/sheets/releases), then run **Extensions: Install from VSIX…** in VS Code. To build the package yourself:
 
 ```bash
 npm ci
 npm run package
+code --install-extension artifacts/sheets-vscode-1.2.2.vsix
 ```
 
-Danach in VS Code **Extensions: Install from VSIX…** ausführen und `artifacts/sheets-vscode-1.2.1.vsix` auswählen. Alternativ:
+Requires VS Code Desktop 1.95 or later on Windows, macOS or Linux. Development and packaging require Node.js 22 or later. The VSIX bundles its runtime dependencies; vscode.dev is not supported.
 
-```bash
-code --install-extension artifacts/sheets-vscode-1.2.1.vsix
-```
+Sheets checks GitHub Releases for updates at startup and offers installation when a VSIX is available. Disable this with `sheets.checkForUpdates`.
 
-Voraussetzungen: VS Code 1.95 oder neuer; zum Entwickeln und Paketieren Node.js 22 oder neuer. Das Paket enthält alle Laufzeitabhängigkeiten.
+## Getting started
 
-Sheets ist für VS Code Desktop unter **Windows, macOS und Linux** ausgelegt. Dieselbe VSIX enthält ausschließlich JavaScript und funktioniert ohne Excel oder native Zusatzmodule auf allen drei Systemen. Tastenkürzel verwenden `Ctrl` unter Windows/Linux und `Cmd` unter macOS; AltGr-Zeichen werden als Texteingabe behandelt. Agent-Werkzeuge akzeptieren auch Windows-Laufwerkspfade, UNC-Netzwerkpfade und relative Pfade mit Backslashes. Die CI prüft Tests, Build und VSIX-Paketierung auf allen drei Betriebssystemen. Eine reine Browser-Installation (vscode.dev) wird nicht unterstützt.
+1. Run **Sheets: Getting Started** from the Command Palette to open the interactive walkthrough.
+2. Open an `.xlsx` or `.xlsm` file, or run **Sheets: New Workbook** to create an XLSX file.
+3. For `.csv` or `.tsv`, right-click the file in Explorer and choose **Open with Sheets**. Alternatively, use **Reopen Editor With… → Sheets (CSV)**.
+4. Enter values and formulas such as `=SUM(A1:A2)`. Use English function names and commas in both UI languages.
+5. Save with **Ctrl+S** / **Cmd+S**. Run **Sheets: Open User Manual** for detailed instructions.
 
-Beim Start von VS Code prüft Sheets, ob in den GitHub Releases eine neuere Version liegt, und bietet dann einen Link zum Release an. Dabei wird nur die öffentliche GitHub-API abgefragt; es werden keine Daten gesendet. Abschalten lässt sich das mit `sheets.checkForUpdates`.
+The interface and walkthrough follow the VS Code language: English or German. The [user manual](docs/manual.en.md) includes a worked example, shortcuts and troubleshooting.
 
-## Erste Schritte
+## Features
 
-- Eine `.xlsx`- oder `.xlsm`-Datei öffnen: Sie erscheint direkt im Sheets-Editor.
-- Eine `.csv`- oder `.tsv`-Datei im Explorer rechts anklicken und **Mit Sheets öffnen** wählen. Alternativ **Öffnen mit… → Sheets (CSV)** verwenden.
-- Über die Befehlspalette **Sheets: Tabellendatei öffnen…** eine Datei auswählen oder mit **Sheets: Neue Arbeitsmappe** eine neue XLSX-Datei anlegen.
-- Mit `Ctrl+S` / `Cmd+S` speichern. Rückgängig und Wiederholen sind mit VS Code verbunden.
+- Edit, copy, paste, fill and manage cells, rows, columns and sheets; hide rows and columns and freeze panes.
+- Paste values, formulas or formats; skip blanks and transpose.
+- Find and replace across a sheet or workbook, including formulas and regular expressions. Jump to cells, ranges or names; zoom from 25% to 400%.
+- Apply number formats, fonts, colors, borders, alignment and table styles.
+- Sort complete records and filter table columns by values with search, multiple selections and blanks. Use structured references such as `Table1[Revenue]`.
+- Calculate formulas including `XLOOKUP`, `FILTER`, `LET`, `LAMBDA`, `MAP`, `REDUCE`, `VSTACK`, `TEXTSPLIT` and `XIRR`.
+- Apply data validation, conditional formatting, color scales, data bars and icon sets.
+- Create column, bar, line, area, pie, doughnut and scatter charts, and create or refresh pivot reports.
+- Display notes and open hyperlinks with Ctrl/Cmd+click.
+- Save Excel workbooks and export the active sheet as CSV/TSV. CSV saves retain the source delimiter and supported encoding.
 
-Die Bezeichnungen folgen der Sprache von VS Code. Englisch und Deutsch werden unterstützt.
+## AI tools
 
-Falls XLSX weiterhin in einem anderen Editor öffnet: Nach der Installation **Developer: Reload Window** ausführen und die Datei schließen und erneut öffnen. Eine bereits konfigurierte Benutzer- oder Workspace-Zuordnung hat Vorrang vor dem Extension-Standard. In diesem Fall über **Öffnen mit… → Standardeditor für „*.xlsx“ konfigurieren… → Sheets** die Zuordnung ändern. In `settings.json` entspricht das:
+In Copilot Chat, select **Agent**, then enable the Sheets tools under **Configure Tools**. Use a current VS Code version for agent support (extension tools require VS Code 1.99 or later). Sheets registers 45 `sheets_*` tools for compatible clients. See the [manual](docs/manual.en.md#ai-assistance) and [Copilot guide](docs/copilot.md).
 
-```json
-"workbench.editorAssociations": {
-  "*.xlsx": "sheets.spreadsheet"
-}
-```
+Changes to open files appear in the editor and can be undone. `sheets.agentTools.headlessWrites` also permits direct saves to unopened files in trusted workspaces. Manual editing requires no AI account. Sheets itself does not send spreadsheet data to external AI services; your AI client may send tool results to its provider.
 
-## Funktionen
-
-- Zellen bearbeiten, kopieren, einfügen und automatisch ausfüllen; Zeilen, Spalten und Blätter verwalten, aus- und einblenden (`Ctrl+9` / `Ctrl+0`, mit Shift einblenden).
-- Inhalte einfügen: nur Werte (`Ctrl+Shift+V`), Formeln oder Formate, Leerzellen überspringen und Transponieren (`Ctrl+Alt+V`).
-- Suchen und Ersetzen (`Ctrl+F` / `Ctrl+H`, auf macOS `Cmd+F` / `Cmd+Option+F`) im Blatt oder in der ganzen Mappe, auch in Formeln und mit regulären Ausdrücken.
-- Gehe zu Zelle, Bereich oder Name (`Ctrl+G` / `Cmd+G`) und Zoom von 25 % bis 400 % (`Ctrl`+Mausrad, Zoomregler in der Statusleiste).
-- Zahlen-, Währungs-, Prozent-, Datums- und eigene Zellformate; Schrift, Farben, Rahmen und Ausrichtung. Zellformatierung über `Ctrl+1` / `Cmd+1`.
-- Tabellen hervorheben, komplette Datensätze sortieren und über die Kopfzeilen nach Werten filtern. Wertefilter bieten Suche, Mehrfachauswahl und leere Werte. Strukturierte Verweise wie `Tabelle1[Umsatz]` oder `[@Menge]` funktionieren in Formeln.
-- Formeln mit über 200 Funktionen, darunter `XLOOKUP`, `FILTER`, `SORTBY`, `LET`, `LAMBDA`, `MAP`, `REDUCE`, `VSTACK`, `TEXTSPLIT`, `XIRR` und `AGGREGATE`; Vorschläge und farbige Zellreferenzen während der Eingabe.
-- Datenüberprüfung mit Dropdown-Listen, Zahlen-, Datums- und Textlängengrenzen sowie eigenen Formeln, Eingabe- und Fehlermeldungen.
-- Bedingte Formatierung mit Zellvergleichen, Formelregeln, Farbskalen, Datenbalken und Symbolsätzen.
-- Notizen werden angezeigt, Hyperlinks und `HYPERLINK`-Formeln öffnen sich mit `Ctrl`/`Cmd`+Klick.
-- Säulen-, Balken-, Linien-, Flächen-, Kreis-, Ring- und Punktdiagramme erstellen und bearbeiten.
-- Pivot-Auswertungen mit Gruppen, Aggregaten und Gesamtsummen erstellen und aktualisieren.
-- Excel-Tabellen, Zellformate, Diagramme und Wertefilter in XLSX speichern. CSV-Trennzeichen bleiben beim Speichern erhalten. **Sheets: Blatt als CSV exportieren…** schreibt das aktive Blatt in eine CSV- oder TSV-Datei.
-- Lässt sich eine Änderung nicht verlustfrei als XLSX speichern, zeigt der Editor das sofort über der Tabelle an, nicht erst beim Speichern.
-- Helles und dunkles VS-Code-Theme sowie fixierte Zeilen und Spalten.
-
-## KI-Agents
-
-Im Copilot-Chat **Agent** wählen und unter **Configure Tools / Werkzeuge konfigurieren** die Sheets-Werkzeuge aktivieren. Für Agent Mode eine aktuelle VS-Code-Version verwenden (Extension-Werkzeuge werden dort seit VS Code 1.99 unterstützt).
-
-Sheets registriert 45 Werkzeuge (`sheets_*`) für Clients, die die VS-Code-Language-Model-Tools unterstützen, beispielsweise Copilot im Agent-Modus. Sie können Bereiche lesen und schreiben, suchen und ersetzen, Formeln und Formate anwenden, Tabellen, Diagramme und Datenüberprüfungen anlegen, Zeilen ausblenden oder sortieren.
-
-Änderungen an geöffneten Dateien erscheinen im Editor und lassen sich rückgängig machen. Die Einstellung `sheets.agentTools.headlessWrites` erlaubt zusätzlich Änderungen an ungeöffneten Dateien, die direkt gespeichert werden. Diese Funktion erfordert einen vertrauenswürdigen Arbeitsbereich. Für die manuelle Tabellenbearbeitung wird kein KI-Konto benötigt.
-
-Andere Extensions können `sheets.executeTool` aufrufen:
+Other extensions can call the command interface:
 
 ```ts
 await vscode.commands.executeCommand('sheets.executeTool', {
@@ -78,30 +59,26 @@ await vscode.commands.executeCommand('sheets.executeTool', {
 });
 ```
 
-Die Tabellenverarbeitung läuft lokal. Die Extension sendet selbst keine Tabellendaten an externe Dienste; ein von dir eingesetzter KI-Client kann Werkzeugergebnisse an seinen Anbieter übertragen.
+## Formats and limitations
 
-## Unterstützte Formate und Grenzen
+Supported: `.xlsx`, `.xlsm`, `.csv`, `.tsv`. Macros are preserved in XLSM but never executed. Legacy `.xls` is not supported. CSV/TSV store only cell values from one sheet, without formatting or charts.
 
-Unterstützt werden `.xlsx`, `.xlsm`, `.csv` und `.tsv`. In `.xlsm`-Dateien bleiben Makros erhalten, werden aber nie ausgeführt. Das alte `.xls`-Format wird nicht unterstützt. CSV/TSV können nur Werte eines Blatts speichern, keine Formatierung oder Diagramme.
+Not every Excel feature is displayed or editable. Images and native pivot caches are preserved rather than rendered as editable objects; notes are read-only. Some built-in table styles are approximated in the editor while the original style stays in the file.
 
-Nicht alle Excel-Funktionen werden im Editor dargestellt oder bearbeitet. Dazu gehören native Pivot-Caches und Bilder; Notizen werden nur angezeigt, nicht bearbeitet. Eingebaute Excel-Tabellenstile werden im Editor teilweise näherungsweise blau dargestellt; der ursprüngliche Stil bleibt in der Datei erhalten.
+Saving uses the original XLSX package and retains unimplemented parts. An unchanged workbook is returned byte for byte. Edits that cannot be preserved safely are blocked before overwriting; the editor shows the reason above the grid. Recovery backups retain unsaved changes. See [XLSX compatibility and save protection (German)](docs/xlsx-compatibility.md).
 
-Beim Speichern bleibt das Originalpaket die Grundlage. Nicht implementierte Bestandteile werden mitgeführt. Ohne Änderung wird die Datei bytegenau zurückgegeben. Änderungen, die sich nicht sicher übertragen lassen – etwa Struktur- oder Sortieränderungen mit unbekannten Excel-Inhalten –, werden vor dem Überschreiben mit einer Fehlermeldung blockiert. Wiederherstellungssicherungen behalten auch solche ungespeicherten Änderungen. Details: [XLSX-Kompatibilität und Speicherschutz](docs/xlsx-compatibility.md).
-
-## Entwicklung
+## Development
 
 ```bash
 npm ci
-npm run build        # Typprüfung und beide Extension-Bundles
-npm test             # Core-, UI-, Agent- und Extension-Tests
-npm run package      # Build, VSIX und Prüfung des fertigen Pakets
+npm run build        # Typecheck and bundle the extension and webview
+npm test             # Core, UI, agent and extension tests
+npm run package      # Build, package and validate the VSIX
 npm run check:package
 ```
 
-Das Repository in VS Code öffnen und **F5** drücken. Die Konfiguration „Sheets: Extension starten“ baut die Extension im Watch-Modus und öffnet einen Extension Development Host. Nach Änderungen am Host-Code dessen Fenster neu laden; nach Änderungen am Webview den Tabelleneditor erneut öffnen.
+Open the repository in VS Code and press **F5** to launch an Extension Development Host with the watch build. Reload the host after extension code changes; reopen the spreadsheet editor after webview changes. `npm run build:all` also builds the MCP server. See [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Die Web-Demo bleibt über `npm run dev:web` verfügbar. `npm run build:all` baut zusätzlich Web-Demo und MCP-Server.
+## License
 
-## Lizenz
-
-MIT. Siehe LICENSE.
+[MIT](LICENSE). Bundled dependency licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

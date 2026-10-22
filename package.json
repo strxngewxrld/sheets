@@ -39,7 +39,7 @@
   },
   "displayName": "Sheets – Excel & CSV Editor",
   "description": "%extension.description%",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "publisher": "Tom-Knueppel",
   "author": {
     "name": "Tom Knüppel",
@@ -171,6 +171,16 @@
         "title": "%command.exportCsv%",
         "category": "Sheets",
         "icon": "$(export)"
+      },
+      {
+        "command": "sheets.gettingStarted",
+        "title": "%command.gettingStarted%",
+        "category": "Sheets"
+      },
+      {
+        "command": "sheets.openManual",
+        "title": "%command.openManual%",
+        "category": "Sheets"
       }
     ],
     "menus": {
@@ -2485,6 +2495,69 @@
         "key": "ctrl+g",
         "mac": "cmd+g",
         "when": "activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "sheets.gettingStarted",
+        "title": "%walkthrough.title%",
+        "description": "%walkthrough.description%",
+        "steps": [
+          {
+            "id": "open",
+            "title": "%walkthrough.open.title%",
+            "description": "%walkthrough.open.description%",
+            "media": {
+              "image": "docs/images/editor.png",
+              "altText": "%walkthrough.editor.alt%"
+            },
+            "completionEvents": [
+              "onContext:activeCustomEditorId == sheets.spreadsheet || activeCustomEditorId == sheets.csv"
+            ]
+          },
+          {
+            "id": "edit",
+            "title": "%walkthrough.edit.title%",
+            "description": "%walkthrough.edit.description%",
+            "media": {
+              "image": "docs/images/editor.png",
+              "altText": "%walkthrough.editor.alt%"
+            }
+          },
+          {
+            "id": "find",
+            "title": "%walkthrough.find.title%",
+            "description": "%walkthrough.find.description%",
+            "media": {
+              "image": "docs/images/find.png",
+              "altText": "%walkthrough.find.alt%"
+            },
+            "completionEvents": [
+              "onCommand:sheets.find"
+            ]
+          },
+          {
+            "id": "save",
+            "title": "%walkthrough.save.title%",
+            "description": "%walkthrough.save.description%",
+            "media": {
+              "image": "docs/images/editor.png",
+              "altText": "%walkthrough.editor.alt%"
+            }
+          },
+          {
+            "id": "manual",
+            "title": "%walkthrough.manual.title%",
+            "description": "%walkthrough.manual.description%",
+            "media": {
+              "image": "docs/images/editor.png",
+              "altText": "%walkthrough.editor.alt%"
+            },
+            "completionEvents": [
+              "onCommand:sheets.openManual"
+            ]
+          }
+        ]
       }
     ]
   },
