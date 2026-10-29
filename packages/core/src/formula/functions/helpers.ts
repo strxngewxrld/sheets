@@ -1,4 +1,5 @@
 import { Err, isError, type CellError, type Scalar } from '../../values.js';
+import { compileSafeRegex, RE2JS } from '../../regex.js';
 import {
   broadcast,
   checkNumber,
@@ -105,7 +106,7 @@ export function roundHalfAway(x: number, digits: number): number {
 // Criteria (COUNTIF, SUMIF, ...)
 // ---------------------------------------------------------------------------
 
-export function wildcardToRegExp(pattern: string): RegExp {
+export function wildcardToRegExp(pattern: string, unanchored = false): RE2JS {
   let re = '';
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i]!;
@@ -114,7 +115,7 @@ export function wildcardToRegExp(pattern: string): RegExp {
     else if (ch === '?') re += '.';
     else re += escapeRe(ch);
   }
-  return new RegExp(`^${re}$`, 'is');
+  return compileSafeRegex(unanchored ? re : `^${re}$`, RE2JS.CASE_INSENSITIVE | RE2JS.DOTALL);
 }
 
 function escapeRe(s: string): string {

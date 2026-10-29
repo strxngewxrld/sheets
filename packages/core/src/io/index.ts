@@ -59,6 +59,8 @@ export interface SaveOptions {
  * sheet of an opened CSV file, otherwise the active sheet. A workbook read from
  * CSV/TSV is written with its original delimiter, line endings, final line
  * break, byte order mark and encoding unless options override them.
+ * New CSV/TSV conversions protect formula-like text for Excel by default;
+ * pass csv.escapeFormulas: false for unchanged data exchange.
  */
 export function saveWorkbook(wb: Workbook, format: FileFormat, options: SaveOptions = {}): Uint8Array {
   switch (format) {
@@ -82,6 +84,9 @@ function saveCsv(wb: Workbook, format: 'csv' | 'tsv', options: NonNullable<SaveO
   // Unchanged records of the opened file are written back as they were (same sheet and delimiter only).
   const original = source && delimiter === source.delimiter && wb.getSheet(sheet) === csvDataSheet(wb) ? source.rows : undefined;
   const text = writeCsv(wb, sheet, {
+    // New CSV/TSV conversions protect text for spreadsheet viewing. Existing
+    // CSV records retain their exact values unless the caller requests protection.
+    escapeFormulas: !source || delimiter !== source.delimiter,
     ...(source ? { lineEnding: source.lineEnding, finalNewline: source.finalNewline, bom: source.bom, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN, original } : {}),
     ...Object.fromEntries(Object.entries(write).filter(([, value]) => value !== undefined)),
     delimiter,

@@ -61,7 +61,8 @@ node scripts/test-ui.mjs
 
 Voraussetzung sind eine aktive Test-Bridge entsprechend `test/ui/host.cjs` im
 entfernten Workspace-Host und ein nur für den Test geöffneter lokaler DevTools-Port.
-Das Testverzeichnis muss hier für Client und Host zugänglich sein. Ohne die beiden
+Das Testverzeichnis muss hier für Client und Host zugänglich sein. Es muss außerdem im Workspace des Hosts liegen,
+weil Agent-Werkzeuge ungeöffnete Dateien nur innerhalb von Workspace-Ordnern erreichen. Ohne die beiden
 Variablen startet die Suite weiterhin ihren eigenen lokalen VS-Code-Testhost.
 
 ## Aufräumen und Grenzen

@@ -7,8 +7,8 @@
  * memory, reloaded when the file changes on disk and saved after each
  * modifying call (unless --no-autosave, then call save_workbook).
  */
-import { readFile, stat, writeFile, mkdir } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -33,13 +33,34 @@ interface Entry {
 }
 const cache = new Map<string, Entry>();
 
-function resolvePath(file: unknown): string {
+async function resolvePath(file: unknown): Promise<string> {
   if (typeof file !== 'string' || !file) throw new Error('Parameter "file" is required (path to an .xlsx, .csv or .tsv file).');
   const full = isAbsolute(file) ? resolve(file) : resolve(root, file);
-  const rel = relative(root, full);
-  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error(`Access outside of ${root} is not allowed.`);
+  if (!inside(root, full)) throw new Error(`Access outside of ${root} is not allowed.`);
   if (!/\.(xlsx|xlsm|csv|tsv|json)$/i.test(full)) throw new Error('Only .xlsx, .xlsm, .csv, .tsv and .json files are supported.');
+  // A symlink inside the root must not reach files outside of it.
+  if (!inside(await realRoot, await realPathOfNearest(full))) throw new Error(`Access outside of ${root} is not allowed (symbolic link).`);
   return full;
+}
+
+const realRoot = realpath(root).catch(() => root);
+
+function inside(base: string, path: string): boolean {
+  const rel = relative(base, path);
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
+}
+
+/** Real path of `path`, or of its nearest existing ancestor for files yet to be created. */
+async function realPathOfNearest(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    // A dangling symlink would be created at its target by writeFile.
+    if (await lstat(path).then(() => true, () => false)) throw new Error(`Access outside of ${root} is not allowed (symbolic link).`);
+    const parent = dirname(path);
+    return parent === path ? path : join(await realPathOfNearest(parent), basename(path));
+  }
 }
 
 async function load(path: string, create = false): Promise<Entry> {
@@ -123,7 +144,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   try {
     if (!allTools.some((t) => t.name === name)) return text(`Unknown tool "${name}"`, true);
     if (name === 'get_agent_guide') return text(AGENT_SYSTEM_PROMPT);
-    const path = resolvePath(input.file);
+    const path = await resolvePath(input.file);
     delete input.file;
 
     if (name === 'create_workbook') {
@@ -136,7 +157,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     if (name === 'save_workbook') {
       const entry = await load(path);
-      const target = input.save_as ? resolvePath(input.save_as) : path;
+      const target = input.save_as ? await resolvePath(input.save_as) : path;
       await save(path, entry, target);
       return text(`Saved ${target}`);
     }

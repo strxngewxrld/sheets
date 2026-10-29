@@ -28,6 +28,8 @@ const child = attachDir ? null : spawn(vscodeExecutable(), [
   '--extensionDevelopmentPath', process.env.SHEETS_EXTENSION_PATH ?? root, '--extensionTestsPath', join(root, 'test/ui/host.cjs'),
   `--remote-debugging-port=${port}`, '--disable-extensions', '--disable-workspace-trust',
   '--skip-welcome', '--skip-release-notes', '--new-window', '--wait',
+  // Agent tools reach unopened files only inside a workspace folder.
+  dir,
 ], { env: vscodeEnvironment({ SHEETS_UI_WORKDIR: dir }), stdio: 'ignore' });
 let spawnError;
 child?.on('error', e => { spawnError = e; });
@@ -114,6 +116,23 @@ try {
     if (m.method === 'Runtime.exceptionThrown' && m.sessionId === sessionId) exceptions.push(m.params.exceptionDetails);
   });
   contextId = await until(attach);
+  await check('Malformed style color cannot inject markup into copied HTML', async () => {
+    const payload = '#000"/><img src=x onerror=alert(1)><td style="color:red';
+    const changed = await host({ tool: 'format_range', input: { range: 'A1', style: { color: payload } } });
+    assert.equal(changed.ok, true);
+    await select('A1');
+    const html = await evaluate(`(()=>{const data=new DataTransfer();const event=new ClipboardEvent('copy',{clipboardData:data,bubbles:true,cancelable:true});document.querySelector('.sx-editor').dispatchEvent(event);return data.getData('text/html')})()`);
+    assert(!html.includes('<img') && !html.includes('onerror') && !html.includes(payload), 'Clipboard contains injected markup');
+    assert(html.includes('Artikel'), 'Cell content missing from clipboard');
+    await host({ tool: 'format_range', input: { range: 'A1', style: { color: null } } });
+  });
+  await check('Huge clipboard selections fail promptly without a webview error', async () => {
+    await select('A1:XFC1048575');
+    const result = await evaluate(`(()=>{let warning;const old=window.alert;window.alert=text=>warning=text;try{const data=new DataTransfer();document.querySelector('.sx-editor').dispatchEvent(new ClipboardEvent('copy',{clipboardData:data,bubbles:true,cancelable:true}));return {warning,html:data.getData('text/html')}}finally{window.alert=old}})()`);
+    assert.match(result.warning, /cell limit/);
+    assert.equal(result.html, '');
+    await select('A1');
+  });
   await check('XLSX formula bar and Unicode values', async () => {
     await select('A2'); assert.equal(await evaluate(`document.querySelector('.sx-formula').value`), 'Müller & Söhne');
     await select('E2'); assert.equal(await evaluate(`document.querySelector('.sx-formula').value`), '=C2*D2');

@@ -67,7 +67,10 @@ export function attr(n: XNode, name: string): string | undefined {
 
 export function numAttr(n: XNode, name: string): number | undefined {
   const v = attr(n, name);
-  return v === undefined || v === '' ? undefined : Number(v);
+  if (v === undefined || v === '') return undefined;
+  const number = Number(v);
+  if (!Number.isFinite(number)) throw new Error(`Not a valid xlsx file: invalid numeric attribute "${name}"`);
+  return number;
 }
 
 /** Boolean OOXML flag element like <b/> or <b val="0"/>. */

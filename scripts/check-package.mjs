@@ -75,11 +75,14 @@ export async function checkPackage(path) {
     commands: { registerCommand(name, action) { commands.set(name, action); return disposable(); } },
     lm: { registerTool(name, tool) { tools.set(name, tool); return disposable(); } },
     Uri: {
-      parse(value) { return { path: '/test.xlsx', toString: () => value }; },
+      parse(value) {
+        const url = new URL(value), path = decodeURIComponent(url.pathname);
+        return { scheme: url.protocol.slice(0, -1), authority: url.host, path, fsPath: path, toString: () => value };
+      },
       joinPath(uri, ...segments) { return { path: [uri.path, ...segments].join('/') }; },
     },
     env: { language: 'en' },
-    workspace: { isTrusted: false, getConfiguration() { return { get() { return true; } }; }, fs: {
+    workspace: { isTrusted: false, workspaceFolders: [{ uri: { scheme: 'file', authority: '', path: '/workspace', fsPath: '/workspace' } }], getConfiguration() { return { get() { return true; } }; }, fs: {
       isWritableFileSystem() { return true; },
       async readFile() { return disk; },
       async writeFile(_uri, value) { disk = value; writes++; },
@@ -105,9 +108,15 @@ export async function checkPackage(path) {
   assert.equal(readTool.prepareInvocation({ input: {} }).confirmationMessages, undefined);
   assert(writeTool.prepareInvocation({ input: { file: 'fixture.xlsx' } }).confirmationMessages);
   await assert.rejects(() => writeTool.invoke({ input: {} }, { isCancellationRequested: true }), vscode.CancellationError);
-  const restricted = await api.executeTool('write_range', { start: 'A1', values: [[1]] }, 'file:///test.xlsx');
+  const restricted = await api.executeTool('write_range', { start: 'A1', values: [[1]] }, 'file:///workspace/test.xlsx');
   assert.equal(restricted.ok, false);
   assert.match(restricted.error, /Trust this workspace/);
+  // Agents must not reach files outside the workspace, not even for reading.
+  for (const file of ['file:///home/user/secret.csv', 'file:///workspace/../etc/data.xlsx', 'file:///workspace/.bashrc']) {
+    const outside = await api.executeTool('read_range', { range: 'A1' }, file);
+    assert.equal(outside.ok, false, file);
+    assert.match(outside.error, /inside the workspace|Only \.xlsx/, file);
+  }
   const provider = providers.get('sheets.spreadsheet');
   const uri = { path: '/fixture.xlsx', scheme: 'file', toString: () => 'file:///fixture.xlsx' };
   const doc = await provider.openCustomDocument(uri, { untitledDocumentData: new Uint8Array() });
@@ -174,12 +183,12 @@ export async function checkPackage(path) {
   disk = zipSync(fixture);
   const originalDisk = disk, originalWrites = writes;
   vscode.workspace.isTrusted = true;
-  const unsafe = await api.executeTool('format_table', { range: 'A1:A2' }, 'file:///headless.xlsx');
+  const unsafe = await api.executeTool('format_table', { range: 'A1:A2' }, 'file:///workspace/headless.xlsx');
   assert.equal(unsafe.ok, false);
   assert.match(unsafe.error, /XLSX-Schutz/);
   assert.equal(writes, originalWrites);
   assert.deepEqual(disk, originalDisk);
-  const safe = await api.executeTool('write_range', { start: 'A1', values: [['Changed']], parse: false }, 'file:///headless.xlsx');
+  const safe = await api.executeTool('write_range', { start: 'A1', values: [['Changed']], parse: false }, 'file:///workspace/headless.xlsx');
   assert.equal(safe.ok, true, safe.error);
   assert.deepEqual(unzipSync(disk)['customXml/opaque.bin'], fixture['customXml/opaque.bin']);
   doc.reset();

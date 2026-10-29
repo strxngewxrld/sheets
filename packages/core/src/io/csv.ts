@@ -19,6 +19,9 @@ export interface CsvReadOptions {
 
 export interface CsvWriteOptions {
   delimiter?: string;
+  /** Prefix formula-like text with a tab inside a quoted field for Excel viewing (default true).
+   * Changes exported text; disable for lossless storage/data exchange. */
+  escapeFormulas?: boolean;
   /** Write displayed (formatted) values instead of raw values (default false). */
   formatted?: boolean;
   /** Write formulas ("=SUM(...)") instead of their results (default false). */
@@ -290,6 +293,25 @@ export function readCsv(text: string, options: CsvReadOptions = {}): Workbook {
   return wb;
 }
 
+export const MAX_CSV_CELLS = 1_000_000;
+export const MAX_CSV_BYTES = 16 * 1024 * 1024;
+
+/** UTF-8 size, including doubled quotes, checked before allocating escaped text. */
+function csvByteLength(text: string, quoted = false): number {
+  let bytes = quoted ? 2 : 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += quoted && code === 34 ? 2 : 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && text.charCodeAt(i + 1) >= 0xdc00 && text.charCodeAt(i + 1) <= 0xdfff) {
+      bytes += 4;
+      i++;
+    } else bytes += 3; // Includes unpaired surrogates, encoded as U+FFFD.
+    if (bytes > MAX_CSV_BYTES) throw new Error('CSV output exceeds the 16 MiB byte limit. Export a smaller range.');
+  }
+  return bytes;
+}
+
 export function writeCsv(wb: Workbook, sheet: string | number = wb.activeSheetIndex, options: CsvWriteOptions = {}): string {
   const s = wb.requireSheet(sheet);
   const d = options.delimiter ?? ',';
@@ -297,11 +319,23 @@ export function writeCsv(wb: Workbook, sheet: string | number = wb.activeSheetIn
   const locale = options.locale ?? (d === ';' ? LOCALE_DE : getDefaultLocale());
   const used = s.usedRange();
   const width = used ? used.end.col + 1 : 0;
+  const escapeFormulas = options.escapeFormulas !== false;
   // An original record is reused only if it reads back as exactly the row's current values.
-  const original = options.formatted || options.formulas ? undefined : options.original;
+  const original = options.formatted || options.formulas || escapeFormulas ? undefined : options.original;
+  // CSV includes the leading empty rectangle, not merely the populated cells.
+  const height = Math.max(used ? used.end.row + 1 : 0, original?.length ?? 0);
+  if (height * Math.max(1, width) > MAX_CSV_CELLS) throw new Error('CSV output exceeds the 1,000,000 cell limit. Export a smaller range.');
+  let bytes = options.bom ? 3 : 0;
+  const reserve = (size: number) => {
+    bytes += size;
+    if (bytes > MAX_CSV_BYTES) throw new Error('CSV output exceeds the 16 MiB byte limit. Export a smaller range.');
+  };
+  const delimiterBytes = csvByteLength(d), eolBytes = csvByteLength(eol);
   const verbatim = (r: number): string | undefined => {
     const record = original?.[r];
     if (record === undefined || record === null) return undefined;
+    // Bound parsing of retained records as well as newly serialized values.
+    csvByteLength(record);
     const fields = parseCsv(record, d)[0] ?? [];
     for (let c = 0; c < Math.max(fields.length, width); c++) {
       const expected = fields[c] === undefined ? null : fieldToCellData(fields[c]!, {}, locale)?.v ?? null;
@@ -315,10 +349,12 @@ export function writeCsv(wb: Workbook, sheet: string | number = wb.activeSheetIn
   if (lastRow < 0) return options.bom ? '\uFEFF' : '';
   const lines: string[] = [];
   for (let r = 0; r <= lastRow; r++) {
+    if (r < lastRow || options.finalNewline !== false) reserve(eolBytes);
     const kept = verbatim(r);
-    if (kept !== undefined) { lines.push(kept); continue; }
+    if (kept !== undefined) { reserve(csvByteLength(kept)); lines.push(kept); continue; }
     const fields: string[] = [];
     for (let c = 0; c < width; c++) {
+      if (c > 0) reserve(delimiterBytes);
       const cell = s.getCell(r, c);
       let text = '';
       if (cell) {
@@ -326,7 +362,14 @@ export function writeCsv(wb: Workbook, sheet: string | number = wb.activeSheetIn
         else if (options.formatted) text = formatValue(cell.value, cell.style?.numFmt, locale);
         else text = scalarText(cell.value, locale);
       }
-      if (text.includes(d) || /["\r\n]/.test(text) || /^\s|\s$/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
+      // Numeric negatives remain numbers. Formula results that are strings and
+      // explicitly requested formula source text need the same protection.
+      const protect = escapeFormulas && (typeof cell?.value === 'string' || options.formatted || (options.formulas && cell?.formula !== undefined)) &&
+        /^(?:[\s\u0000-\u001f]*[=+\-@＝＋－＠]|[\t\r\n])/.test(text);
+      const quoted = !!protect || text.includes(d) || /["\r\n]/.test(text) || /^\s|\s$/.test(text);
+      reserve(csvByteLength(text, quoted) + (protect ? 1 : 0));
+      if (protect) text = `\t${text}`;
+      if (quoted) text = `"${text.replace(/"/g, '""')}"`;
       fields.push(text);
     }
     lines.push(fields.join(d));

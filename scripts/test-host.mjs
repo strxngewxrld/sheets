@@ -12,6 +12,9 @@ const dir = await mkdtemp(join(tmpdir(), 'sheets-host-test-'));
 const profile = join(dir, 'user-data');
 const resultPath = join(dir, 'result.json');
 const startupFile = join(dir, 'startup.xlsx');
+// Agent tools reach unopened files only inside a workspace folder.
+const workspace = join(dir, 'workspace');
+await mkdir(workspace);
 await copyFile(join(root, 'packages/core/test/fixtures/excel-features.xlsx'), startupFile);
 await mkdir(join(profile, 'User'), { recursive: true });
 await writeFile(join(profile, 'User/settings.json'), JSON.stringify({
@@ -24,8 +27,8 @@ const child = spawn(executable, [
   '--extensionDevelopmentPath', process.env.SHEETS_EXTENSION_PATH ?? root, '--extensionTestsPath', join(root, 'test/host/index.cjs'),
   '--disable-extensions', '--disable-gpu', '--disable-workspace-trust',
   '--skip-welcome', '--skip-release-notes', '--new-window', '--wait',
-  startupFile,
-], { stdio: 'inherit', env: vscodeEnvironment({ SHEETS_HOST_RESULT: resultPath, SHEETS_HOST_WORKDIR: dir }) });
+  workspace, startupFile,
+], { stdio: 'inherit', env: vscodeEnvironment({ SHEETS_HOST_RESULT: resultPath, SHEETS_HOST_WORKDIR: workspace }) });
 let spawnError;
 child.on('error', (error) => { spawnError = error; });
 const closed = new Promise((resolve) => child.once('exit', resolve));

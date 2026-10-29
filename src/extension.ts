@@ -1,5 +1,5 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { platform, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import * as vscode from 'vscode';
 import { openWorkbook, saveWorkbook, formatFromFileName, Workbook, writeXlsx } from '@sheets/core';
@@ -9,7 +9,7 @@ import { registerCopilotTools } from './copilot.js';
 import { decodeBytes } from './binary.js';
 import type { CsvExport } from './protocol.js';
 import { checkForUpdates, downloadVsix } from './update-check.js';
-import { resolveFileUri } from './file-uri.js';
+import { escapesFolders, hasProviderSymlink, headlessAccessError, resolveFileUri } from './file-uri.js';
 import { reopenStartupSpreadsheets } from './startup-editors.js';
 
 export interface SheetsApi {
@@ -151,7 +151,27 @@ async function exportCsv(): Promise<void> {
   if (!de) choices.unshift(choices.splice(1, 1)[0]!);
   const choice = await vscode.window.showQuickPick(choices, { placeHolder: de ? 'Trennzeichen für den Export' : 'Delimiter for the export' });
   if (!choice) return;
-  const result = await doc.request<CsvExport>('exportCsv', { delimiter: choice.delimiter });
+  const mode = await vscode.window.showQuickPick([
+    {
+      label: de ? 'Für Excel (Textschutz)' : 'For Excel (text protection)',
+      description: de ? 'Stellt Formeltext einen Tabulator voran; verändert exportierte Textwerte.' : 'Prefixes formula-like text with a tab; changes exported text values.',
+      escapeFormulas: true,
+    },
+    {
+      label: de ? 'Unveränderte Werte' : 'Unchanged values',
+      description: de ? 'Für Datenimporte. Fremder Text kann in Excel als Formel ausgeführt werden.' : 'For data imports. Untrusted text may execute as a formula in Excel.',
+      escapeFormulas: false,
+    },
+  ], { placeHolder: de ? 'Verwendung der exportierten Datei' : 'How the exported file will be used' });
+  if (!mode) return;
+  let result: CsvExport;
+  try {
+    result = await doc.request<CsvExport>('exportCsv', { delimiter: choice.delimiter, escapeFormulas: mode.escapeFormulas });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(de ? `CSV-Export fehlgeschlagen: ${reason}` : `CSV export failed: ${reason}`);
+    return;
+  }
   const base = doc.uri.path.split('/').pop()!.replace(/\.[^.]+$/, '');
   const name = `${base}-${result.sheet}.${choice.ext}`.replace(/[\\/:*?"<>|]/g, '_');
   const target = await vscode.window.showSaveDialog({
@@ -169,11 +189,27 @@ function resolveUri(file: string | vscode.Uri | undefined): vscode.Uri | undefin
   return resolveFileUri(file, folder?.uri);
 }
 
+async function headlessAccessDenied(uri: vscode.Uri): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders?.map((folder) => folder.uri) ?? [];
+  const error = headlessAccessError(uri, folders, uri.scheme === 'file' && (platform() === 'win32' || platform() === 'darwin'));
+  if (error) return error;
+  const outside = 'Spreadsheets reached through a symbolic link that leads outside the workspace cannot be used without opening them.';
+  if (uri.scheme === 'file') {
+    const roots = folders.filter((folder) => folder.scheme === 'file').map((folder) => folder.fsPath);
+    return (await escapesFolders(uri.fsPath, roots)) ? outside : undefined;
+  }
+  // Other file systems cannot resolve links; refuse a link instead.
+  return await hasProviderSymlink(uri, folders, (part) => vscode.workspace.fs.stat(part)) ? outside : undefined;
+}
+
 async function executeTool(name: string, input: Record<string, unknown>, file?: string | vscode.Uri): Promise<ToolResult> {
   const uri = resolveUri(file);
   if (!uri) return { ok: false, error: 'No spreadsheet is open. Pass "file" with the path of an .xlsx or .csv file.' };
   const def = TOOL_DEFINITIONS.find((t) => t.name === name);
   if (!def) return { ok: false, error: `Unknown tool "${name}"` };
+  if (!def.readOnly && vscode.workspace.fs.isWritableFileSystem(uri.scheme) === false) {
+    return { ok: false, error: 'This spreadsheet file system is read-only.' };
+  }
 
   // Live: the document is open in an editor.
   const doc = provider.documents.get(uri.toString());
@@ -185,7 +221,11 @@ async function executeTool(name: string, input: Record<string, unknown>, file?: 
     }
   }
 
-  // Headless: load, run, save.
+  // Headless: load, run, save. Agents reach only spreadsheets in the workspace.
+  let denied: string | undefined;
+  try { denied = await headlessAccessDenied(uri); }
+  catch { return { ok: false, error: 'Cannot verify safe access to this spreadsheet.' }; }
+  if (denied) return { ok: false, error: denied };
   if (!def.readOnly && !vscode.workspace.isTrusted) {
     return { ok: false, error: 'Trust this workspace before allowing agents to modify unopened spreadsheet files.' };
   }

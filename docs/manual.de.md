@@ -114,6 +114,10 @@ Notizen importierter Arbeitsmappen werden angezeigt, lassen sich aber nicht bear
 
 **Strg+S** / **Cmd+S** speichert das offene Dokument; Rückgängig/Wiederholen ist in VS Code eingebunden. **Speichern unter** verwendet das Format der Zieldatei. Für eine separate Wertekopie **Sheets: Blatt als CSV exportieren…** ausführen, Komma, Semikolon oder Tabulator wählen und das Ziel festlegen. Der Export schreibt das aktive Blatt und ersetzt die Quellmappe nicht.
 
+Beim Export zuerst den Verwendungszweck wählen: **Für Excel (Textschutz)** stellt Texten mit möglichen Formelpräfixen einen Tabulator innerhalb eines zitierten CSV-Felds voran. Das verändert die exportierten Textwerte; Zahlen bleiben Zahlen. **Unveränderte Werte** ist für Datenimporte gedacht und übernimmt Texte wörtlich, die Excel möglicherweise als Formel interpretiert. Auch neue CSV-/TSV-Konvertierungen über „Speichern unter“ verwenden den Textschutz. Das normale Speichern einer bestehenden CSV bleibt verlustfrei. Für die unveränderte Weitergabe von Texten an Tabellenprogramme eignet sich XLSX besser, da es Text- und Formelzellen unterscheidet; CSV-Schutz hängt vom Zielprogramm ab.
+
+CSV-/TSV-Ausgaben sind auf eine Million Positionen und 16 MiB UTF-8-Ausgabe begrenzt. Führende Leerzeilen und Leerspalten zählen mit. Zu große Ausgaben werden vor dem Schreiben mit einer Fehlermeldung abgelehnt; die Mappe bleibt geöffnet und kann als XLSX gespeichert werden.
+
 | Format | Gespeicherter Inhalt |
 | --- | --- |
 | XLSX | Mehrere Blätter, Formeln, unterstützte Formatierung, Tabellen und Diagramme. Unbekannte Originalteile bleiben erhalten, soweit sicher möglich. |

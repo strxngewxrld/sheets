@@ -191,10 +191,9 @@ export const textFunctions: FunctionDef[] = [
   def('SEARCH', 'text', 'SEARCH(find_text, within_text, [start_num])', 'Case-insensitive position of text with wildcards.', ([f, w, s], ctx) => {
     const start = numArg(s, ctx, 1);
     const within = textArg(w, ctx);
-    const re = wildcardToRegExp(textArg(f, ctx));
-    const pattern = new RegExp(re.source.slice(1, -1), 'is');
-    const m = pattern.exec(within.slice(start - 1));
-    return !m || start < 1 ? Err.VALUE : m.index + start;
+    const pattern = wildcardToRegExp(textArg(f, ctx), true);
+    const matcher = pattern.matcher(within.slice(start - 1));
+    return start < 1 || !matcher.find() ? Err.VALUE : matcher.start() + start;
   }, { minArgs: 2, maxArgs: 3 }),
   def('TEXT', 'text', 'TEXT(value, format_text)', 'Formats a number using a format code.', ([v, f], ctx) => {
     const val = scalarArg(v, ctx);

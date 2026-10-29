@@ -1,5 +1,5 @@
-import { strFromU8, unzipSync } from 'fflate';
-import { formatAddress, parseAddress, parseRange } from '../address.js';
+import { strFromU8 } from 'fflate';
+import { formatAddress, MAX_COLS, MAX_ROWS, parseAddress, parseRange } from '../address.js';
 import type { ChartAnchor, ChartSeries, ChartSpec, ChartType, LegendPosition } from '../chart.js';
 import { newChartId } from '../chart.js';
 import { dateToSerial, timeToSerial } from '../dates.js';
@@ -18,6 +18,7 @@ import { readValidations } from './xlsx-validations.js';
 import { scanSheetData } from './sheet-data.js';
 import { applyTint, DEFAULT_THEME, INDEXED_COLORS } from './colors.js';
 import { arr, attr, collectText, decodeOoxmlEscapes, flag, numAttr, parseXml, relsPathFor, resolvePath, text, type XNode } from './xml.js';
+import { unzipLimited } from './zip.js';
 import { encodeXlsxArchive } from './xlsx-preserve.js';
 
 export interface XlsxReadOptions {
@@ -45,7 +46,7 @@ export function pointsToPx(pt: number): number {
 class Package {
   private files: Record<string, Uint8Array>;
   constructor(bytes: Uint8Array) {
-    this.files = unzipSync(bytes);
+    this.files = unzipLimited(bytes);
   }
   has(path: string): boolean {
     return path in this.files;
@@ -308,7 +309,7 @@ function readChart(doc: XNode, anchor: ChartAnchor): ChartSpec | null {
     if (nameRef) s.nameRef = nameRef;
     else if (ser.tx?.v !== undefined) s.name = text(ser.tx.v);
     const color = attr(ser.spPr?.solidFill?.srgbClr, 'val') ?? attr(ser.spPr?.ln?.solidFill?.srgbClr, 'val');
-    if (color) s.color = `#${color}`;
+    if (color && /^[0-9a-f]{6}$/i.test(color)) s.color = `#${color}`;
     series.push(s);
   }
   if (!series.length) return null;
@@ -395,7 +396,10 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
   const colWidths: Record<number, number> = {};
   for (const col of arr(ws.cols?.col)) {
     const min = numAttr(col, 'min')!;
-    const max = Math.min(numAttr(col, 'max')!, min + 16_383);
+    const max = numAttr(col, 'max')!;
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min || max > MAX_COLS) {
+      throw new Error('Not a valid xlsx file: invalid column bounds');
+    }
     const hidden = attr(col, 'hidden') === '1' || attr(col, 'hidden') === 'true';
     const width = numAttr(col, 'width');
     if (!hidden && width === undefined) continue;
@@ -411,6 +415,7 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
   let rowIndex = -1;
   for (const row of arr(ws.sheetData?.row)) {
     rowIndex = numAttr(row, 'r') !== undefined ? numAttr(row, 'r')! - 1 : rowIndex + 1;
+    if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= MAX_ROWS) throw new Error('Not a valid xlsx file: invalid row index');
     const ht = numAttr(row, 'ht');
     const hidden = attr(row, 'hidden') === '1' || attr(row, 'hidden') === 'true';
     if (hidden) rowHeights[rowIndex] = 0;
@@ -419,7 +424,9 @@ function readSheet(pkg: Package, path: string, name: string, sharedStrings: stri
     for (const c of arr(row.c)) {
       const ref = attr(c, 'r');
       const addr = ref ? parseAddress(ref) : null;
+      if (ref && !addr) throw new Error('Not a valid xlsx file: invalid cell address');
       colIndex = addr ? addr.col : colIndex + 1;
+      if (colIndex >= MAX_COLS) throw new Error('Not a valid xlsx file: invalid column index');
       const r = addr ? addr.row : rowIndex;
       const data: CellData = {};
       const styleIdx = numAttr(c, 's');

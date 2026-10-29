@@ -1563,13 +1563,18 @@ export class SpreadsheetView {
   private onCopy(e: ClipboardEvent, cut: boolean): void {
     if (this.editor.editing) return;
     e.preventDefault();
-    const range = this.selectionRange();
-    this.clip = copyRange(this.wb, this.sheet.name, range);
-    if (cut && !this.options.readOnly) this.clip.cut = true;
-    this.clipText = rangeToTSV(this.wb, this.sheet.name, this.clip.range);
-    e.clipboardData?.setData('text/plain', this.clipText);
-    e.clipboardData?.setData('text/html', this.toHtml(this.clip.range));
-    this.scheduleRender();
+    try {
+      const range = this.selectionRange();
+      this.clip = copyRange(this.wb, this.sheet.name, range);
+      if (cut && !this.options.readOnly) this.clip.cut = true;
+      this.clipText = rangeToTSV(this.wb, this.sheet.name, this.clip.range);
+      e.clipboardData?.setData('text/plain', this.clipText);
+      e.clipboardData?.setData('text/html', this.toHtml(this.clip.range));
+      this.scheduleRender();
+    } catch (error) {
+      this.clip = null;
+      alert(error instanceof Error ? error.message : String(error));
+    }
   }
 
   private toHtml(range: RangeAddress): string {
@@ -1579,7 +1584,10 @@ export class SpreadsheetView {
       for (let c = range.start.col; c <= range.end.col; c++) {
         const cell = this.sheet.getCell(r, c);
         const s = cell?.style;
-        const css = [s?.bold ? 'font-weight:bold' : '', s?.italic ? 'font-style:italic' : '', s?.color ? `color:${s.color}` : '', s?.fill ? `background:${s.fill}` : ''].filter(Boolean).join(';');
+        // Clipboard HTML is parsed by other applications, outside our webview CSP.
+        const color = clipboardColor(s?.color);
+        const fill = clipboardColor(s?.fill);
+        const css = [s?.bold ? 'font-weight:bold' : '', s?.italic ? 'font-style:italic' : '', color ? `color:${color}` : '', fill ? `background:${fill}` : ''].filter(Boolean).join(';');
         cells.push(`<td${css ? ` style="${css}"` : ''}>${escapeHtml(cell ? formatValue(cell.value, s?.numFmt, this.locale) : '')}</td>`);
       }
       rows.push(`<tr>${cells.join('')}</tr>`);
@@ -2266,6 +2274,10 @@ function isDark(color: string): boolean {
     if (rgb) [r, g, b] = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
   }
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128;
+}
+
+function clipboardColor(value: unknown): string | undefined {
+  return typeof value === 'string' && /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) ? value : undefined;
 }
 
 function escapeHtml(s: string): string {

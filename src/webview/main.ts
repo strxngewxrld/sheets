@@ -32,6 +32,7 @@ let agent: SpreadsheetAgent | null = null;
 let offChange: (() => void) | null = null;
 let fileName = 'Book1.xlsx';
 let language = 'en';
+let readOnly = false;
 let csvDelimiter = ',';
 /** Line endings, final line break and BOM of the opened CSV, reproduced on save. */
 let csvLayout: CsvLayout | undefined;
@@ -98,6 +99,7 @@ function csvLosses(wb: Workbook): string[] {
 function init(msg: InitMessage): void {
   fileName = msg.fileName;
   language = msg.language;
+  readOnly = msg.readOnly;
   const strings = shellStrings(language);
   setXlsxMessageLanguage(language);
   try {
@@ -133,7 +135,7 @@ function init(msg: InitMessage): void {
     if (!view) {
       app.replaceChildren();
       view = new SpreadsheetView(app, wb, { locale, language: msg.language, keyboardUndo: false, readOnly: msg.readOnly, onOpenLink: (url) => post({ type: 'openLink', url }) });
-      agent = new SpreadsheetAgent(() => view!.workbook, { host: view.agentHost });
+      agent = new SpreadsheetAgent(() => view!.workbook, { host: view.agentHost, filter: (tool) => !readOnly || !!tool.readOnly });
     } else {
       view.setWorkbook(wb);
     }
@@ -183,7 +185,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebview>) => {
           const delimiter = sameFormat ? csvDelimiter : format === 'tsv' ? '\t' : language.toLowerCase().startsWith('de') ? ';' : ',';
           const bytes = saveWorkbook(wb, format, {
             // Another format is a conversion and written as UTF-8; the same format keeps the file's encoding.
-            csv: { delimiter, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN, ...(sameFormat && csvLayout ? csvLayout : { lineEnding: '\n', encoding: 'utf-8' }) },
+            csv: { delimiter, locale: delimiter === ';' ? LOCALE_DE : LOCALE_EN, ...(!sameFormat ? { escapeFormulas: true } : {}), ...(sameFormat && csvLayout ? csvLayout : { lineEnding: '\n', encoding: 'utf-8' }) },
           });
           const encoding = wb.csvSource?.encoding;
           if (sameFormat && encoding === 'windows-1252' && !csvEncodingWarned && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
@@ -205,7 +207,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebview>) => {
           post({ type: 'response', id: msg.id, result: encodeBytes(bytes) });
         } else if (msg.method === 'exportCsv') {
           const wb = view.workbook;
-          const bytes = new TextEncoder().encode(writeCsv(wb, wb.activeSheetIndex, { delimiter: msg.params.delimiter, locale: msg.params.delimiter === ';' ? LOCALE_DE : LOCALE_EN, lineEnding: '\r\n' }));
+          const bytes = new TextEncoder().encode(writeCsv(wb, wb.activeSheetIndex, { delimiter: msg.params.delimiter, escapeFormulas: msg.params.escapeFormulas !== false, locale: msg.params.delimiter === ';' ? LOCALE_DE : LOCALE_EN, lineEnding: '\r\n' }));
           post({ type: 'response', id: msg.id, result: { sheet: wb.activeSheet.name, bytes: encodeBytes(bytes) } });
         } else if (msg.method === 'executeTool') {
           post({ type: 'response', id: msg.id, result: agent.execute(msg.params.name, msg.params.input) });

@@ -4,14 +4,14 @@ import { createHash } from 'node:crypto';
 export interface ReleaseAsset {
   name: string;
   url: string;
-  /** Hex SHA-256 reported by GitHub, if available. */
-  sha256?: string;
+  /** Hex SHA-256 reported by GitHub; a VSIX without one is never installed. */
+  sha256: string;
 }
 
 export interface LatestRelease {
   version: string;
   url: string;
-  /** The VSIX attached to the release, if there is exactly one. */
+  /** The VSIX attached to the release, if there is exactly one and GitHub reports its checksum. */
   vsix?: ReleaseAsset;
 }
 
@@ -41,6 +41,15 @@ function parseVersion(text: string): number[] | undefined {
   return match ? match.slice(1).map(Number) : undefined;
 }
 
+/** Compare parsed URLs so dot segments and backslashes cannot escape the repository. */
+function isReleaseUrl(value: string, base: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.origin === 'https://github.com' && !url.username && !url.password &&
+      !url.search && !url.hash && !/%(?:2f|5c)/i.test(url.pathname) && url.href.toLowerCase().startsWith(base);
+  } catch { return false; }
+}
+
 /** True when `candidate` is a higher x.y.z version than `current`. */
 export function isNewerVersion(candidate: string, current: string): boolean {
   const a = parseVersion(candidate), b = parseVersion(current);
@@ -60,29 +69,43 @@ export async function latestRelease(repository: string, fetchImpl: typeof fetch)
   if (typeof data.tag_name !== 'string' || typeof data.html_url !== 'string') return undefined;
   // Only ever open the release page of this repository.
   const base = `https://github.com/${repository.toLowerCase()}/releases/`;
-  if (!data.html_url.toLowerCase().startsWith(base)) return undefined;
+  if (!isReleaseUrl(data.html_url, base)) return undefined;
   const vsix = releaseVsix(data.assets, `${base}download/`);
   return { version: data.tag_name.replace(/^v/, ''), url: data.html_url, ...(vsix && { vsix }) };
 }
 
-/** The single .vsix asset downloaded from this repository's releases, if any. */
+/** The single .vsix asset downloaded from this repository's releases, if any and if it has a checksum. */
 function releaseVsix(assets: unknown, downloadBase: string): ReleaseAsset | undefined {
   if (!Array.isArray(assets)) return undefined;
   const found = assets.filter((a): a is { name: string; browser_download_url: string; digest?: unknown } =>
     typeof a?.name === 'string' && /\.vsix$/i.test(a.name) &&
-    typeof a.browser_download_url === 'string' && a.browser_download_url.toLowerCase().startsWith(downloadBase));
+    typeof a.browser_download_url === 'string' && isReleaseUrl(a.browser_download_url, downloadBase));
   if (found.length !== 1) return undefined;
   const { name, browser_download_url: url, digest } = found[0]!;
   const sha256 = typeof digest === 'string' ? /^sha256:([0-9a-f]{64})$/i.exec(digest)?.[1]?.toLowerCase() : undefined;
-  return { name, url, ...(sha256 && { sha256 }) };
+  // Without a checksum only the release page is offered.
+  return sha256 ? { name, url, sha256 } : undefined;
 }
+
+export const MAX_VSIX_BYTES = 100 * 1024 * 1024;
 
 /** Downloads a release VSIX and verifies the checksum GitHub reports for it. */
 export async function downloadVsix(asset: ReleaseAsset, fetchImpl: typeof fetch): Promise<Uint8Array> {
   const response = await fetchImpl(asset.url, { signal: AbortSignal.timeout(120_000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (asset.sha256 && createHash('sha256').update(bytes).digest('hex') !== asset.sha256) {
+  const tooLarge = () => new Error(`The download exceeds ${MAX_VSIX_BYTES / 1024 / 1024} MB`);
+  if (Number(response.headers.get('content-length') ?? 0) > MAX_VSIX_BYTES) throw tooLarge();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body ?? []) {
+    size += chunk.length;
+    if (size > MAX_VSIX_BYTES) throw tooLarge();
+    chunks.push(chunk);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  if (createHash('sha256').update(bytes).digest('hex') !== asset.sha256) {
     throw new Error('SHA-256 mismatch');
   }
   return bytes;

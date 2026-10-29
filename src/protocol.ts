@@ -14,6 +14,11 @@ export interface InitMessage {
 /** Editor commands bound to VS Code keybindings (see package.json). */
 export type ViewCommand = 'find' | 'replace' | 'hideRows' | 'unhideRows' | 'hideCols' | 'unhideCols' | 'goTo' | 'zoomIn' | 'zoomOut' | 'zoomReset';
 
+export interface CsvExportParams {
+  delimiter: string;
+  escapeFormulas?: boolean;
+}
+
 export type HostToWebview =
   | InitMessage
   | { type: 'undo' }
@@ -23,7 +28,7 @@ export type HostToWebview =
   /** `fileName` is the save target; its extension selects the written format ("Save As"). */
   | { type: 'request'; id: number; method: 'getFileData'; params?: { fileName: string } }
   | { type: 'request'; id: number; method: 'executeTool'; params: { name: string; input: unknown } }
-  | { type: 'request'; id: number; method: 'exportCsv'; params: { delimiter: string } };
+  | { type: 'request'; id: number; method: 'exportCsv'; params: CsvExportParams };
 
 /** Result of an exportCsv request: the active sheet as CSV. */
 export interface CsvExport {

@@ -49,3 +49,14 @@ describe('TEXTBEFORE and TEXTAFTER', () => {
     expect(result('=TEXTBEFORE({"a.b";"c.d"}, ".")')).toEqual([['a'], ['c']]);
   });
 });
+
+describe('wildcard search resource safety', () => {
+  it('handles repeated wildcard alternatives in formulas without exponential backtracking', () => {
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [['a'.repeat(1000) + '!']]);
+    const pattern = '*a'.repeat(20) + 'b';
+    expect(wb.evaluate(`=COUNTIF(A1,"${pattern}")`)).toBe(0);
+    expect(wb.evaluate(`=SEARCH("${pattern}",A1)`)).toMatchObject({ code: '#VALUE!' });
+    expect(wb.evaluate('=SEARCH("?b","😀abc")')).toBe(3);
+  });
+});

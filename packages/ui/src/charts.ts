@@ -13,6 +13,8 @@ export interface ChartTheme {
 export const PALETTE_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
 export const PALETTE_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
 
+const SAFE_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function niceStep(range: number, ticks: number): number {
@@ -53,9 +55,14 @@ function truncate(s: string, maxWidth: number, size: number): string {
 }
 
 /** Renders a chart as an SVG string. */
-export function renderChartSvg(data: ResolvedChart, spec: ChartSpec, width: number, height: number, theme: ChartTheme): string {
+export function renderChartSvg(data: ResolvedChart, spec: ChartSpec, width: number, height: number, themeColors: ChartTheme): string {
+  const theme: ChartTheme = { ...themeColors, background: esc(themeColors.background), text: esc(themeColors.text), muted: esc(themeColors.muted), grid: esc(themeColors.grid) };
   const palette = theme.dark ? PALETTE_DARK : PALETTE_LIGHT;
-  const color = (i: number) => data.series[i]?.color ?? palette[i % palette.length]!;
+  // Series colors come from opened files and backups; anything else would end up as SVG markup.
+  const color = (i: number) => {
+    const c = data.series[i]?.color;
+    return c && SAFE_COLOR.test(c) ? c : palette[i % palette.length]!;
+  };
   const parts: string[] = [];
   const font = `font-family="${esc(theme.fontFamily)}"`;
   let top = 10;

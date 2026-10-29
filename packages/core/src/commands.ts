@@ -18,6 +18,7 @@ import { applyStylePatch, type CellStyle, type StylePatch } from './style.js';
 import { compareScalars } from './formula/evaluator.js';
 import { isError, scalarToJson, type Scalar } from './values.js';
 import type { ApplyOptions, Workbook } from './workbook.js';
+import { compileSafeRegex, RE2JS } from './regex.js';
 
 /**
  * High-level editing commands shared by the UI and the agent API. Each
@@ -35,6 +36,14 @@ export function clipToUsed(sheet: Sheet, range: RangeAddress): RangeAddress | nu
 
 function sheetName(wb: Workbook, sheet: string | number): string {
   return wb.requireSheet(sheet).name;
+}
+
+/** Dense operations must reject enormous selections before allocating cells. */
+function checkDenseRange(range: RangeAddress): void {
+  const { start, end } = range;
+  if (![start.row, start.col, end.row, end.col].every(Number.isInteger) || start.row < 0 || start.col < 0 ||
+    end.row < start.row || end.col < start.col || end.row >= MAX_ROWS || end.col >= MAX_COLS) throw new Error('Invalid cell range');
+  if ((end.row - start.row + 1) * (end.col - start.col + 1) > 1_000_000) throw new Error('Range exceeds the 1000000-cell limit');
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +156,10 @@ export function applyBorders(
   options: ApplyOptions = {},
 ): void {
   const s = wb.requireSheet(sheet);
+  const target = clipToUsed(s, range);
+  if (!target) return;
+  range = target;
+  checkDenseRange(range);
   const cells: CellPatch[] = [];
   for (let r = range.start.row; r <= range.end.row; r++) {
     for (let c = range.start.col; c <= range.end.col; c++) {
@@ -209,7 +222,8 @@ export interface ClipboardData {
 
 export function copyRange(wb: Workbook, sheet: string | number, range: RangeAddress): ClipboardData {
   const s = wb.requireSheet(sheet);
-  const r = clipToUsed(s, range) ?? range;
+  const r = clipToUsed(s, range) ?? { start: range.start, end: range.start };
+  checkDenseRange(r);
   const cells: (CellData | null)[][] = [];
   const derived: { row: number; col: number }[] = [];
   for (let row = r.start.row; row <= r.end.row; row++) {
@@ -258,6 +272,8 @@ export function pasteRange(
   const tCols = target.end.col - target.start.col + 1;
   const repR = tRows % srcRows === 0 ? tRows / srcRows : 1;
   const repC = tCols % srcCols === 0 ? tCols / srcCols : 1;
+  if (!srcRows || !srcCols) throw new Error('Clipboard is empty');
+  checkDenseRange({ start: target.start, end: { row: target.start.row + repR * srcRows - 1, col: target.start.col + repC * srcCols - 1 } });
   const cells: CellPatch[] = [];
   const written = new Set<string>();
   const derived = new Set(clip.derived?.map((p) => `${p.row},${p.col}`));
@@ -324,6 +340,7 @@ export function pasteRange(
 /** Plain text (TSV) representation of a range, using displayed values. */
 export function rangeToTSV(wb: Workbook, sheet: string | number, range: RangeAddress): string {
   const s = wb.requireSheet(sheet);
+  checkDenseRange(range);
   const lines: string[] = [];
   for (let r = range.start.row; r <= range.end.row; r++) {
     const vals: string[] = [];
@@ -357,6 +374,8 @@ function seriesStep(values: Scalar[]): number | null {
  */
 export function fillRange(wb: Workbook, sheet: string | number, source: RangeAddress, target: RangeAddress, options: ApplyOptions = {}): void {
   const s = wb.requireSheet(sheet);
+  checkDenseRange(source);
+  checkDenseRange(target);
   const vertical = target.start.col === source.start.col && target.end.col === source.end.col;
   const forward = vertical ? target.end.row > source.end.row : target.end.col > source.end.col;
   const cells: CellPatch[] = [];
@@ -578,10 +597,10 @@ export interface FindResult {
   formula?: string;
 }
 
-function searchPattern(query: string, opts: FindOptions, global = false): RegExp {
-  const flags = (opts.caseSensitive ? '' : 'i') + (global ? 'g' : '');
+function searchPattern(query: string, opts: FindOptions): RE2JS {
+  const flags = opts.caseSensitive ? 0 : RE2JS.CASE_INSENSITIVE;
   const source = opts.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(opts.wholeCell ? `^(?:${source})$` : source, flags);
+  return compileSafeRegex(opts.wholeCell ? `^(?:${source})$` : source, flags);
 }
 
 function inSearchRange(opts: FindOptions, row: number, col: number): boolean {
@@ -634,7 +653,7 @@ function constantText(v: Scalar): string | null {
  */
 export function replaceCells(wb: Workbook, query: string, replacement: string, opts: ReplaceOptions = {}, options: ApplyOptions = {}): number {
   if (query === '') return 0;
-  const re = searchPattern(query, opts, true);
+  const re = searchPattern(query, opts);
   const only = opts.cells && new Set(opts.cells.map((c) => `${c.sheet.toUpperCase()}!${c.row}:${c.col}`));
   const patches = new Map<string, CellPatch[]>();
   let count = 0;
@@ -646,10 +665,8 @@ export function replaceCells(wb: Workbook, query: string, replacement: string, o
       if (!inSearchRange(opts, row, col) || (only && !only.has(`${sheet.name.toUpperCase()}!${row}:${col}`))) continue;
       const content = cell.formula !== undefined ? (opts.inFormulas ? `=${cell.formula}` : null) : constantText(cell.value);
       if (content === null) continue;
-      re.lastIndex = 0;
       if (!re.test(content)) continue;
-      re.lastIndex = 0;
-      const next = content.replace(re, opts.regex ? replacement : replacement.replace(/\$/g, '$$$$'));
+      const next = re.matcher(content).replaceAll(opts.regex ? replacement : RE2JS.quoteReplacement(replacement));
       if (next === content) continue;
       const list = patches.get(sheet.name) ?? [];
       list.push({ row, col, data: inputToCellData(next, cell.style) });

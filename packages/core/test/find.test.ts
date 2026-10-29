@@ -10,6 +10,21 @@ function book() {
 }
 
 describe('find', () => {
+  it('matches adversarial nested repetitions without native regex backtracking', () => {
+    const wb = new Workbook();
+    setValues(wb, 0, 0, 0, [['a'.repeat(100_000) + '!']]);
+    expect(findCells(wb, '(a+)+$', { regex: true })).toEqual([]);
+    expect(replaceCells(wb, '(a+)+$', 'x', { regex: true })).toBe(0);
+  });
+
+  it('rejects unsupported regex features and oversized patterns without native fallback', () => {
+    const wb = book();
+    for (const pattern of ['(a+)\\1', '(?=apple)', 'a'.repeat(4097)]) {
+      expect(() => findCells(wb, pattern, { regex: true })).toThrow();
+      expect(() => replaceCells(wb, pattern, 'x', { regex: true })).toThrow();
+    }
+    expect(() => findCells(wb, '[', { regex: true })).toThrow();
+  });
   it('searches values or formulas, optionally within a range', () => {
     const wb = book();
     expect(findCells(wb, 'apple').map((r) => `${r.sheet}!${r.address}`)).toEqual(['Sheet1!A1', 'Sheet1!A2', 'Sheet1!C2', 'Other!A1']);
@@ -57,5 +72,13 @@ describe('replace', () => {
     const wb = book();
     expect(replaceCells(wb, '(\\w+) pie', '$1 cake', { regex: true })).toBe(1);
     expect(wb.getValue(0, 0, 0)).toBe('Apple cake');
+  });
+
+  it('keeps JS replacement semantics for named groups and literal dollars', () => {
+    const wb = book();
+    expect(replaceCells(wb, '(?<word>\\w+) pie', '$<word> $$ $&', { regex: true })).toBe(1);
+    expect(wb.getValue(0, 0, 0)).toBe('Apple $ Apple pie');
+    expect(replaceCells(wb, 'x$y', '$&$1', { wholeCell: true })).toBe(1);
+    expect(wb.getValue(0, 2, 1)).toBe('$&$1');
   });
 });

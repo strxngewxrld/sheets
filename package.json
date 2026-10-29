@@ -37,6 +37,11 @@
     "vitest": "^5.0.5",
     "fflate": "^0.8.3"
   },
+  "overrides": {
+    "@azure/identity": {
+      "@azure/msal-node": "^7.1.1"
+    }
+  },
   "displayName": "Sheets – Excel & CSV Editor",
   "description": "%extension.description%",
   "version": "1.2.2",

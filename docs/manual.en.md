@@ -114,6 +114,10 @@ Notes from imported workbooks are displayed but cannot be edited. Open hyperlink
 
 **Ctrl+S** / **Cmd+S** saves the open document; undo/redo integrates with VS Code. **Save As** uses the target file's format. To create a values-only copy, run **Sheets: Export Sheet as CSV…**, choose comma, semicolon or tab, then choose the destination. Export writes the active sheet without replacing the source workbook.
 
+Choose the export's intended use: **For Excel (text protection)** prefixes text with possible formula prefixes with a tab inside a quoted CSV field. This changes exported text values; numbers remain numeric. **Unchanged values** is for data imports and preserves text that Excel might interpret as a formula. New CSV/TSV conversions through Save As also use text protection. Normal saves of an existing CSV retain its original values. XLSX is better suited to sharing unchanged text with spreadsheet applications because it distinguishes text from formulas; CSV protection depends on the receiving application.
+
+CSV/TSV output is limited to one million positions and 16 MiB of UTF-8 output, including leading empty rows and columns. Oversized output is rejected with an error before writing; the workbook stays open and can be saved as XLSX.
+
 | Format | What to expect |
 | --- | --- |
 | XLSX | Multiple sheets, formulas, supported formatting, tables and charts. Unsupported original parts are preserved where safe. |

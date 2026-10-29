@@ -11,9 +11,13 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "dependencies": {
     "fast-xml-parser": "^5.11.2",
-    "fflate": "^0.8.3"
+    "fflate": "^0.8.3",
+    "re2js": "^2.9.0"
   }
 }

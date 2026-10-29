@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Security: bound all CSV/TSV output to 1,000,000 positions and 16 MiB, rejecting sparse oversized sheets before output iteration. CSV export offers Excel text protection or unchanged data; new conversions protect formula-like text by default while existing CSV saves remain lossless. See `docs/security-review-2026-10-29.md`.
+- macOS attack testing: reject nonfinite and out-of-range XLSX row/column metadata before importing, fixing a webview freeze triggered by a tiny crafted workbook.
+- macOS attack testing: use a linear-time regular-expression engine for find/replace and formula wildcards, preventing expensive patterns from blocking the editor. Limit regex patterns to 4096 characters; unsupported backreferences and lookarounds now report an invalid pattern.
+- macOS attack testing: bound dense border, copy, paste, TSV and fill operations to 1,000,000 cells, and reject unsafe style colors when creating HTML for the system clipboard.
+- Security review: check every remote path component for symlinks, fail closed on provider errors and reject ambiguous Windows separators. Agent writes now respect read-only file systems in both the extension host and webview, including after revert.
+- Security review: preflight all ZIP entries before decompression and reject inconsistent stored-entry sizes; normalize GitHub release URLs before enforcing the repository boundary.
+- Dependencies: override the publishing toolchain's transitive `@azure/msal-node` to patched `^7.1.1` (GHSA-xcx6-jx8p-x3h5); CI now fails on high/critical dependency advisories. See `docs/security-review.md` for findings and validation.
+- Security: agent tools (Copilot, `sheets.executeTool`) reach unopened files only when they are spreadsheets (`.xlsx`, `.xlsm`, `.csv`, `.tsv`) inside a workspace folder, read-only tools included; symbolic links leading out of the workspace are refused. Before, any path on the machine could be read, and written through a link.
+- Security: the MCP server resolves symbolic links before its `--root` check, so a link inside the root can no longer read or overwrite files outside of it. Dangling links are refused.
+- Security: chart series colors from XLSX files must be hex RGB values; the chart renderer additionally escapes all colors. A crafted file could inject markup into the editor before. The webview CSP now also sets `form-action 'none'` and `base-uri 'none'` and uses a cryptographic nonce.
+- Security: XLSX archives are refused before inflating when a part exceeds 512 MB, the content exceeds 1 GB or there are more than 20,000 parts (ZIP bombs).
+- Security: the update installer offers a VSIX only when GitHub reports its SHA-256 checksum and refuses downloads above 100 MB; otherwise it only opens the release page.
+- Dependencies: update `body-parser` and `fast-uri` (MCP server); CI actions are pinned to commit SHAs.
+
 ## 1.2.2
 
 - Documentation: add English and German READMEs and user manuals with Windows MCP screenshots and a sample CSV. Add a localized VS Code Getting Started walkthrough, plus commands to reopen it and read the bundled manual.

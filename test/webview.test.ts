@@ -66,6 +66,20 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('VS Code webview commands', () => {
+  it('refuses agent writes to read-only workbooks while retaining read access', () => {
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: true });
+    send({ type: 'request', id: 1, method: 'executeTool', params: { name: 'write_range', input: { start: 'A1', values: [['blocked']] } } });
+    expect(response(1).result).toMatchObject({ ok: false });
+    send({ type: 'request', id: 2, method: 'executeTool', params: { name: 'read_range', input: { range: 'A1' } } });
+    expect(response(2).result).toMatchObject({ ok: true });
+    // A revert/reinitialization must not leave the old agent writable.
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: false });
+    send({ type: 'request', id: 3, method: 'executeTool', params: { name: 'write_range', input: { start: 'A1', values: [['allowed']] } } });
+    expect(response(3).result).toMatchObject({ ok: true });
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: true });
+    send({ type: 'request', id: 4, method: 'executeTool', params: { name: 'write_range', input: { start: 'A1', values: [['blocked']] } } });
+    expect(response(4).result).toMatchObject({ ok: false });
+  });
   it('forwards keybinding commands to the view', () => {
     send({ type: 'init', bytes: encodeBytes(saveWorkbook(new Workbook(), 'xlsx')), fileName: 'book.xlsx', language: 'en', readOnly: false });
     send({ type: 'command', command: 'find' });
@@ -110,6 +124,36 @@ describe('VS Code webview save warnings and CSV export', () => {
     const result = response(7).result as { sheet: string; bytes: string };
     expect(result.sheet).toBe('Sheet1');
     expect(new TextDecoder().decode(decodeBytes(result.bytes))).toBe('Name;Value\r\nA;1,5\r\n');
+  });
+
+  it('protects formula-like text on export by default and permits explicit raw export', () => {
+    send({ type: 'init', bytes: encodeBytes(strToU8('=1+1\n')), fileName: 'source.csv', language: 'en', readOnly: false });
+    send({ type: 'request', id: 1, method: 'exportCsv', params: { delimiter: ',' } });
+    send({ type: 'request', id: 2, method: 'exportCsv', params: { delimiter: ',', escapeFormulas: false } });
+    send({ type: 'request', id: 3, method: 'getFileData' });
+    const exported = (id: number) => new TextDecoder().decode(decodeBytes((response(id).result as { bytes: string }).bytes));
+    expect(exported(1)).toBe('"\t=1+1"\r\n');
+    expect(exported(2)).toBe('=1+1\r\n');
+    expect(new TextDecoder().decode(decodeBytes(response(3).result as string))).toBe('=1+1\n');
+  });
+
+  it('protects text when Save As converts an XLSX to CSV', () => {
+    const wb = new Workbook();
+    wb.load({ sheets: [{ name: 'Sheet1', cells: { A1: { v: '=1+1' } } }] });
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(wb, 'xlsx')), fileName: 'source.xlsx', language: 'en', readOnly: false });
+    send({ type: 'request', id: 1, method: 'getFileData', params: { fileName: 'export.csv' } });
+    expect(new TextDecoder().decode(decodeBytes(response(1).result as string))).toBe('"\t=1+1"\n');
+  });
+
+  it('returns an export error for a sparse oversized sheet and remains usable', () => {
+    const wb = new Workbook();
+    wb.load({ sheets: [{ name: 'Sheet1', cells: { XFD1048576: { v: 'x' } } }] });
+    send({ type: 'init', bytes: encodeBytes(saveWorkbook(wb, 'xlsx')), fileName: 'sparse.xlsx', language: 'en', readOnly: false });
+    send({ type: 'request', id: 1, method: 'exportCsv', params: { delimiter: ',' } });
+    expect(response(1).error).toMatch(/cell limit/);
+    expect(response(1).result).toBeUndefined();
+    send({ type: 'request', id: 2, method: 'executeTool', params: { name: 'read_range', input: { range: 'XFD1048576' } } });
+    expect(response(2).result).toMatchObject({ ok: true });
   });
 });
 

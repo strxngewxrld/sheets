@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { checkForUpdates, downloadVsix, githubRepository, isNewerVersion, latestRelease, type UpdateCheckDeps } from '../src/update-check.js';
+import { checkForUpdates, downloadVsix, githubRepository, isNewerVersion, latestRelease, MAX_VSIX_BYTES, type UpdateCheckDeps } from '../src/update-check.js';
 
 const REPO = 'git+https://github.com/example/sheets.git';
 
@@ -50,6 +50,16 @@ describe('update check', () => {
     expect(d.skip).not.toHaveBeenCalled();
   });
 
+  it.each(['../..', '%2e%2e/%2e%2e', '..\\..'])('rejects a release URL with path traversal: %s', async (escape) => {
+    const html_url = `https://github.com/example/sheets/releases/${escape}/other/releases/tag/v1.0.0`;
+    expect(await latestRelease('example/sheets', respond({ tag_name: 'v1.0.0', html_url }))).toBeUndefined();
+    const release = await latestRelease('example/sheets', respond({
+      tag_name: 'v1.0.0', html_url: 'https://github.com/example/sheets/releases/tag/v1.0.0',
+      assets: [{ name: 'x.vsix', browser_download_url: `https://github.com/example/sheets/releases/download/${escape}/other/x.vsix`, digest: `sha256:${'a'.repeat(64)}` }],
+    }));
+    expect(release?.vsix).toBeUndefined();
+  });
+
   it('remembers a skipped version and stays quiet for it', async () => {
     const d = deps({ notify: vi.fn(async () => 'skip' as const) });
     await checkForUpdates(d);
@@ -79,13 +89,20 @@ describe('update check', () => {
     expect((await latestRelease('example/sheets', respond({ tag_name: 'v1.0.0', html_url: page,
       assets: [asset('x.vsix', 'https://evil.example/x.vsix')] })))?.vsix).toBeUndefined();
     expect((await latestRelease('example/sheets', respond({ tag_name: 'v1.0.0', html_url: page,
-      assets: [asset('a.vsix', ok), asset('b.vsix', ok)] })))?.vsix).toBeUndefined();
+      assets: [asset('a.vsix', ok, `sha256:${hash}`), asset('b.vsix', ok, `sha256:${hash}`)] })))?.vsix).toBeUndefined();
+  });
+
+  it('offers only the release page for a VSIX without a checksum', async () => {
+    const page = 'https://github.com/example/sheets/releases/tag/v1.0.0';
+    const url = 'https://github.com/example/sheets/releases/download/v1.0.0/sheets-vscode-1.0.0.vsix';
+    const release = await latestRelease('example/sheets', respond({ tag_name: 'v1.0.0', html_url: page, assets: [{ name: 'sheets-vscode-1.0.0.vsix', browser_download_url: url }] }));
+    expect(release).toEqual({ version: '1.0.0', url: page });
   });
 
   it('installs the VSIX when the user chooses it', async () => {
-    const vsix = { name: 'sheets-vscode-0.3.0.vsix', url: 'https://github.com/example/sheets/releases/download/v0.3.0/sheets-vscode-0.3.0.vsix' };
+    const vsix = { name: 'sheets-vscode-0.3.0.vsix', url: 'https://github.com/example/sheets/releases/download/v0.3.0/sheets-vscode-0.3.0.vsix', sha256: 'b'.repeat(64) };
     const d = deps({
-      fetch: respond({ tag_name: 'v0.3.0', html_url: 'https://github.com/example/sheets/releases/tag/v0.3.0', assets: [{ name: vsix.name, browser_download_url: vsix.url }] }),
+      fetch: respond({ tag_name: 'v0.3.0', html_url: 'https://github.com/example/sheets/releases/tag/v0.3.0', assets: [{ name: vsix.name, browser_download_url: vsix.url, digest: `sha256:${vsix.sha256}` }] }),
       notify: vi.fn(async () => 'install' as const),
     });
     await checkForUpdates(d);
@@ -95,9 +112,19 @@ describe('update check', () => {
 
   it('rejects a downloaded VSIX with a wrong checksum', async () => {
     const bytes = new TextEncoder().encode('vsix');
-    const fetchImpl = vi.fn(async () => ({ ok: true, arrayBuffer: async () => bytes.buffer }) as Response);
+    const fetchImpl = vi.fn(async () => new Response(bytes));
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     expect(await downloadVsix({ name: 'a.vsix', url: 'u', sha256 }, fetchImpl)).toEqual(bytes);
     await expect(downloadVsix({ name: 'a.vsix', url: 'u', sha256: '0'.repeat(64) }, fetchImpl)).rejects.toThrow('SHA-256');
+  });
+
+  it('refuses a VSIX download larger than the limit', async () => {
+    const declared = vi.fn(async () => new Response('x', { headers: { 'content-length': String(MAX_VSIX_BYTES + 1) } }));
+    await expect(downloadVsix({ name: 'a.vsix', url: 'u', sha256: '0'.repeat(64) }, declared)).rejects.toThrow('exceeds');
+    const chunk = new Uint8Array(1024 * 1024);
+    const streamed = vi.fn(async () => new Response(new ReadableStream({
+      pull(controller) { controller.enqueue(chunk); },
+    })));
+    await expect(downloadVsix({ name: 'a.vsix', url: 'u', sha256: '0'.repeat(64) }, streamed)).rejects.toThrow('exceeds');
   });
 });

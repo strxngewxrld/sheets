@@ -11,6 +11,7 @@ import type { Workbook } from '../workbook.js';
 import { tableNameAt } from '../table.js';
 import type { SheetData } from '../sheet.js';
 import { validationsXml } from './xlsx-validations.js';
+import { unzipLimited } from './zip.js';
 import { arr, attr, encodeOoxmlEscapes, escapeXml, parseXml, resolvePath, relsPathFor, text } from './xml.js';
 import { PreservedStyles } from './xlsx-preserve-styles.js';
 import { patchLayout } from './xlsx-preserve-layout.js';
@@ -521,7 +522,7 @@ export function preserveXlsx(wb: Workbook, compression: 0 | 1 | 2 | 3 | 4 | 5 | 
   const source = wb.xlsxSource!;
   if (!source.baseline) protect('Die Import-Basis fehlt.', 'The import baseline is missing.');
   const baseline = source.baseline;
-  const original = decodeArchive(source.archive), files = unzipSync(original), current = wb.toJSON();
+  const original = decodeArchive(source.archive), files = unzipLimited(original), current = wb.toJSON();
   if (!source.structuralEdits && sameModel(current, baseline)) return original;
   if (Object.keys(files).some((name) => /(?:^_xmlsignatures\/|vbaProjectSignature)/i.test(name))) protect('Die Datei enthält digitale Signaturen.', 'The file contains digital signatures.');
   const rootRels = relations(files, '');

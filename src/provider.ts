@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { decodeBytes, encodeBytes } from './binary.js';
-import type { HostToWebview, WebviewToHost } from './protocol.js';
+import type { CsvExportParams, HostToWebview, WebviewToHost } from './protocol.js';
 import { fill, shellStrings } from './webview/strings.js';
 
 /** A spreadsheet file opened in the custom editor. The live model lives in the webview. */
@@ -33,8 +34,8 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
   request<T>(method: 'getBackupData'): Promise<T>;
   request<T>(method: 'getFileData', params?: { fileName: string }): Promise<T>;
   request<T>(method: 'executeTool', params: { name: string; input: unknown }): Promise<T>;
-  request<T>(method: 'exportCsv', params: { delimiter: string }): Promise<T>;
-  request<T>(method: 'getFileData' | 'getBackupData' | 'executeTool' | 'exportCsv', params?: { name: string; input: unknown } | { delimiter: string } | { fileName: string }): Promise<T> {
+  request<T>(method: 'exportCsv', params: CsvExportParams): Promise<T>;
+  request<T>(method: 'getFileData' | 'getBackupData' | 'executeTool' | 'exportCsv', params?: { name: string; input: unknown } | CsvExportParams | { fileName: string }): Promise<T> {
     if (!this.panel) return Promise.reject(new Error('Spreadsheet editor is not open'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
@@ -44,7 +45,7 @@ export class SpreadsheetDocument implements vscode.CustomDocument {
       }, 60_000);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       const message: HostToWebview = method === 'executeTool' ? { type: 'request', id, method, params: params as { name: string; input: unknown } }
-        : method === 'exportCsv' ? { type: 'request', id, method, params: params as { delimiter: string } }
+        : method === 'exportCsv' ? { type: 'request', id, method, params: params as CsvExportParams }
           : method === 'getFileData' ? { type: 'request', id, method, ...(params ? { params: params as { fileName: string } } : {}) }
             : { type: 'request', id, method };
       if (this.initialized) this.post(message);
@@ -236,7 +237,7 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
       bytes: encodeBytes(document.bytes),
       fileName: document.uri.path.split('/').pop() ?? 'Book1.xlsx',
       language: vscode.env.language,
-      readOnly: false,
+      readOnly: vscode.workspace.fs.isWritableFileSystem(document.uri.scheme) === false,
     });
   }
 
@@ -257,12 +258,12 @@ export class SpreadsheetEditorProvider implements vscode.CustomEditorProvider<Sp
     const strings = shellStrings(vscode.env.language);
     const escape = (text: string) => text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'));
-    const nonce = Array.from({ length: 32 }, () => Math.floor(Math.random() * 36).toString(36)).join('');
+    const nonce = randomBytes(16).toString('base64url');
     return `<!DOCTYPE html>
-<html lang="${vscode.env.language}">
+<html lang="${escape(vscode.env.language)}">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}'; form-action 'none'; base-uri 'none';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; } #app { height: 100vh; }
 .sheets-status { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; white-space: pre-line; font-family: var(--vscode-font-family, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--vscode-foreground, #333); background: var(--vscode-editor-background, #fff); }
