@@ -37,11 +37,11 @@ Die GitHub-Actions-Matrix führt Typecheck, Tests und VSIX-Paketierung unter Ubu
 
 `npm run test:ui` baut die Extension und prüft die gerenderte Custom-Editor-Webview in einem eigenen Extension Development Host über Chromium DevTools. Voraussetzung ist eine lokale VS-Code-Desktop-Installation; mit `VSCODE_EXECUTABLE` lässt sich deren Launcher vorgeben. Die Prüfung verwendet ausschließlich erzeugte XLSX-/CSV-Dateien und ein temporäres Profil. Sie testet unter anderem Eingabe, Formeln, Einfügen, Suchen/Ersetzen, Datenüberprüfung, Menütastatur und Listener-Lebensdauer, schmale Dialoge, Tabellenfilter, alle Diagrammtypen, Blattverwaltung, Zoom, Light/Dark Theme und Speichern/Wiederöffnen. Ergebnis, Testdateien und Screenshots bleiben im ausgegebenen temporären Verzeichnis erhalten. Die Verbindung bleibt lokal; zusätzliche Browserpakete werden nicht benötigt. Native macOS-Menüs und Systemdialoge sind weiterhin manuell zu prüfen.
 
-### Windows-E2E-Nachweis
+### Windows- und Remote-E2E
 
-Der [Windows-Testbericht](docs/windows-e2e.md) beschreibt den geprüften Stand und die Grenzen der Abdeckung. Beide E2E-Starter entfernen geerbtes `ELECTRON_RUN_AS_NODE` und behalten ihre temporären Ergebnisdateien. Mit `SHEETS_EXTENSION_PATH` kann statt des Workspace-Builds das Verzeichnis einer separat installierten Extension geprüft werden; die Tests selbst kommen weiterhin aus diesem Repository.
+Beide E2E-Starter entfernen geerbtes `ELECTRON_RUN_AS_NODE` und behalten ihre temporären Ergebnisdateien. Mit `SHEETS_EXTENSION_PATH` kann statt des Workspace-Builds das Verzeichnis einer separat installierten Extension geprüft werden; die Tests selbst kommen weiterhin aus diesem Repository.
 
-Der [Remote-SSH-Testbericht](docs/remote-ssh-e2e.md) dokumentiert den Lauf mit entferntem Windows-Extension-Host. Mit `SHEETS_UI_ATTACH_DIR` und `SHEETS_UI_DEBUG_PORT` kann die UI-Suite eine bereits laufende, isolierte Testsitzung mit aktiver Test-Bridge verwenden.
+Für Läufe mit entferntem Extension Host (Remote-SSH): Mit `SHEETS_UI_ATTACH_DIR` und `SHEETS_UI_DEBUG_PORT` kann die UI-Suite eine bereits laufende, isolierte Testsitzung mit aktiver Test-Bridge verwenden.
 
 ## Icon
 

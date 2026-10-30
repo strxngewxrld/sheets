@@ -96,7 +96,7 @@ export async function checkPackage(path) {
       assert.equal(name, 'vscode', `Unbundled dependency: ${name}`);
       return vscode;
     },
-    console, setTimeout, clearTimeout, TextEncoder, TextDecoder, Uint8Array, Buffer, btoa, atob, structuredClone,
+    console, setTimeout, clearTimeout, TextEncoder, TextDecoder, Uint8Array, Buffer, btoa, atob, structuredClone, performance,
   }, { filename: 'extension/dist/extension.js', timeout: 10_000 });
   const context = { subscriptions: [], extensionUri: { path: '/extension' } };
   const api = module.exports.activate(context);

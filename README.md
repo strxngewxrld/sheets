@@ -13,7 +13,7 @@ Download a VSIX from [GitHub Releases](https://github.com/strxngewxrld/sheets/re
 ```bash
 npm ci
 npm run package
-code --install-extension artifacts/sheets-vscode-1.2.2.vsix
+code --install-extension artifacts/sheets-vscode-1.2.3.vsix
 ```
 
 Requires VS Code Desktop 1.95 or later on Windows, macOS or Linux. Development and packaging require Node.js 22 or later. The VSIX bundles its runtime dependencies; vscode.dev is not supported.
