@@ -220,7 +220,8 @@ export const mathFunctions: FunctionDef[] = [
     return Math.sign(x || 1) * (v % 2 === 1 ? v : v + 1);
   }),
   unary('FACT', 'Factorial.', (x) => {
-    if (x < 0) return Err.NUM;
+    // Larger factorials exceed the number range.
+    if (x < 0 || x >= 171) return Err.NUM;
     let r = 1;
     for (let i = 2; i <= Math.floor(x); i++) r *= i;
     return r;
@@ -395,17 +396,4 @@ export const mathFunctions: FunctionDef[] = [
     }
     return mean(xs);
   }, { minArgs: 1 }),
-  def('SEQUENCE', 'math', 'SEQUENCE(rows, [columns], [start], [step])', 'Array of sequential numbers.', ([r, c, s, st], ctx) => {
-    const rows = numArg(r, ctx);
-    const cols = numArg(c, ctx, 1);
-    const start = numArg(s, ctx, 1);
-    const step = numArg(st, ctx, 1);
-    const out: Scalar[][] = [];
-    for (let i = 0; i < rows; i++) {
-      const row: Scalar[] = [];
-      for (let j = 0; j < cols; j++) row.push(start + (i * cols + j) * step);
-      out.push(row);
-    }
-    return out;
-  }, { minArgs: 1, maxArgs: 4 }),
 ];

@@ -1,5 +1,6 @@
 import { Err, isError, type CellError } from '../../values.js';
 import { checkNumber, toMatrix, type EvalValue, type FunctionContext } from '../evaluator.js';
+import { chargeWork } from '../limits.js';
 import type { FunctionDef } from '../registry.js';
 import { bail, def, numArg, scalarsOf } from './helpers.js';
 
@@ -70,6 +71,7 @@ function cumulative(name: 'CUMIPMT' | 'CUMPRINC'): FunctionDef {
       if (rate <= 0 || periods <= 0 || present <= 0 || first < 1 || last < first || last > periods || (type !== 0 && type !== 1)) return Err.NUM;
       const pmt = payment(rate, periods, present, 0, type);
       let total = 0;
+      chargeWork(last - first + 1);
       for (let per = first; per <= last; per++) {
         const interest = interestPart(rate, per, pmt, present, type);
         total += name === 'CUMIPMT' ? interest : pmt - interest;
@@ -85,6 +87,7 @@ function decliningBalance(cost: number, salvage: number, life: number, period: n
   const rate = Math.round((1 - Math.pow(salvage / cost, 1 / life)) * 1000) / 1000;
   let total = (cost * rate * month) / 12;
   if (period === 1) return total;
+  chargeWork(period);
   for (let p = 2; p < period; p++) total += (cost - total) * rate;
   return period === life + 1 ? ((cost - total) * rate * (12 - month)) / 12 : (cost - total) * rate;
 }

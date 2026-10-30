@@ -234,8 +234,9 @@ function formatNumberSection(n: number, raw: string, loc: FormatLocale): string 
     expText = `E${sign}${String(Math.abs(exp)).padStart(digits, '0')}`;
   }
 
-  let [int, dec = ''] = value.toFixed(maxDec).split('.') as [string, string?];
-  dec = dec.slice(0, maxDec);
+  // toFixed accepts at most 100 digits; further format digits can only be zeros.
+  let [int, dec = ''] = value.toFixed(Math.min(maxDec, 100)).split('.') as [string, string?];
+  dec = dec.slice(0, maxDec).padEnd(minDec, '0');
   while (dec.length > minDec && dec.endsWith('0')) dec = dec.slice(0, -1);
   if (int === '0' && minInt === 0) int = '';
   int = int.padStart(minInt, '0');

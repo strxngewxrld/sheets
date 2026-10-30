@@ -145,14 +145,15 @@ export const engineeringFunctions: FunctionDef[] = [
     const n = Math.trunc(a), k = Math.trunc(b);
     if (n < 0 || k < 0 || n < k) return Err.NUM;
     let r = 1;
-    for (let i = 1; i <= Math.min(k, n - k); i++) r = (r * (n - Math.min(k, n - k) + i)) / i;
-    return r < 2 ** 53 ? Math.round(r) : r;
+    // Stop at the overflow, which comes within about a thousand steps.
+    for (let i = 1; i <= Math.min(k, n - k) && Number.isFinite(r); i++) r = (r * (n - Math.min(k, n - k) + i)) / i;
+    return !Number.isFinite(r) ? Err.NUM : r < 2 ** 53 ? Math.round(r) : r;
   }),
   binary('PERMUT', 'PERMUT(number, number_chosen)', 'Number of ordered selections without repetition.', (a, b) => {
     const n = Math.trunc(a), k = Math.trunc(b);
     if (n <= 0 || k < 0 || n < k) return Err.NUM;
     let r = 1;
-    for (let i = 0; i < k; i++) r *= n - i;
-    return r;
+    for (let i = 0; i < k && Number.isFinite(r); i++) r *= n - i;
+    return Number.isFinite(r) ? r : Err.NUM;
   }),
 ];

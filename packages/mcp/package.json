@@ -9,7 +9,7 @@
   "main": "./dist/server.js",
   "files": ["dist"],
   "scripts": {
-    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --conditions=source --outfile=dist/server.js --banner:js='#!/usr/bin/env node' --packages=bundle",
+    "build": "esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --conditions=source --outfile=dist/server.js --banner:js=\"#!/usr/bin/env node\" --packages=bundle",
     "start": "node dist/server.js"
   },
   "dependencies": {

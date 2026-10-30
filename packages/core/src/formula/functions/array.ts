@@ -2,9 +2,10 @@ import { MAX_COLS, MAX_ROWS } from '../../address.js';
 import { CellError, Err, isError, type Scalar } from '../../values.js';
 import { compareScalars, toBoolean, toMatrix, type EvalContext, type EvalValue, type Matrix } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
+import { checkMatrixSize as limit } from '../limits.js';
 import { bail, boolArg, def, numArg, scalarArg } from './helpers.js';
 
-export const MAX_ARRAY_CELLS = 1_000_000;
+export { MAX_ARRAY_CELLS } from '../limits.js';
 
 function transpose(matrix: Matrix): Matrix {
   return Array.from({ length: matrix[0]?.length ?? 0 }, (_, c) => matrix.map((row) => row[c] ?? null));
@@ -12,10 +13,6 @@ function transpose(matrix: Matrix): Matrix {
 
 function width(m: Matrix): number {
   return m[0]?.length ?? 0;
-}
-
-function limit(rows: number, cols: number): void {
-  if (rows * cols > MAX_ARRAY_CELLS) bail(new CellError('#CALC!', 'Array exceeds the cell limit'));
 }
 
 /** Rows (or columns) selected by TAKE/DROP; negative counts work from the end. */
@@ -49,6 +46,7 @@ function flattenTo(m: Matrix, ignore: number, byColumn: boolean): Scalar[] {
 }
 
 function wrap(values: Scalar[], count: number, pad: Scalar): Matrix {
+  limit(Math.ceil(values.length / count), count);
   const out: Matrix = [];
   for (let i = 0; i < values.length; i += count) {
     const row = values.slice(i, i + count);
@@ -70,7 +68,7 @@ export const arrayFunctions: FunctionDef[] = [
     const start = numArg(s, ctx, 1);
     const step = numArg(d, ctx, 1);
     if (!(rows >= 1 && rows <= MAX_ROWS && cols >= 1 && cols <= MAX_COLS)) return Err.VALUE;
-    if (rows * cols > MAX_ARRAY_CELLS) return new CellError('#CALC!', 'Array exceeds the cell limit');
+    limit(rows, cols);
     return Array.from({ length: rows }, (_, row) => Array.from({ length: cols }, (_, col) => {
       const n = start + (row * cols + col) * step;
       return Number.isFinite(n) ? n : Err.NUM;
@@ -150,11 +148,14 @@ export const arrayFunctions: FunctionDef[] = [
   }, { minArgs: 2, maxArgs: 3 }),
   def('CHOOSEROWS', 'lookup', 'CHOOSEROWS(array, row_num1, [row_num2], ...)', 'Returns the given rows of an array; negative numbers count from the end.', ([a, ...idx], ctx) => {
     const m = toMatrix(a!, ctx);
-    return pick(idx, m.length, ctx).map((i) => m[i]!);
+    const rows = pick(idx, m.length, ctx);
+    limit(rows.length, width(m));
+    return rows.map((i) => m[i]!);
   }, { minArgs: 2 }),
   def('CHOOSECOLS', 'lookup', 'CHOOSECOLS(array, col_num1, [col_num2], ...)', 'Returns the given columns of an array; negative numbers count from the end.', ([a, ...idx], ctx) => {
     const m = toMatrix(a!, ctx);
     const cols = pick(idx, width(m), ctx);
+    limit(m.length, cols.length);
     return m.map((row) => cols.map((c) => row[c] ?? null));
   }, { minArgs: 2 }),
   def('TOCOL', 'lookup', 'TOCOL(array, [ignore], [scan_by_column])', 'Returns an array as one column; ignore 1 = blanks, 2 = errors, 3 = both.', ([a, i, b], ctx) => {

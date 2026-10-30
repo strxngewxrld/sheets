@@ -1,7 +1,7 @@
 import { Err, isError, type CellError, type Scalar } from '../../values.js';
 import { broadcast, checkNumber, deref, isMatrix, isRef, toMatrix, toNumber, type EvalContext, type EvalValue, type FunctionContext, type Matrix } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
-import { MAX_ARRAY_CELLS } from './array.js';
+import { chargeWork, MAX_ARRAY_CELLS } from '../limits.js';
 import { bail, boolArg, def, num, numArg, numbersOf } from './helpers.js';
 import { mean, modeOf, percentileExc, sum, variance } from './math.js';
 
@@ -170,6 +170,8 @@ function trend(args: EvalValue[], ctx: FunctionContext, growth: boolean): Matrix
   const design = observations.map((x) => (withConst ? [1, ...x] : x));
   const p = design[0]!.length;
   if (n < p) bail(Err.NUM);
+  // Normal equations and elimination grow with the square and cube of the variables.
+  chargeWork(p * p * n + p * p * p);
   const XtX = Array.from({ length: p }, (_, i) => Array.from({ length: p }, (_, j) => design.reduce((a, row) => a + row[i]! * row[j]!, 0)));
   const Xty = Array.from({ length: p }, (_, i) => design.reduce((a, row, r) => a + row[i]! * ys[r]!, 0));
   const coef = solve(XtX, Xty);
@@ -351,6 +353,7 @@ export const statisticsFunctions: FunctionDef[] = [
     const integer = boolArg(int, ctx, false);
     if (rows < 1 || cols < 1 || min > max) return Err.VALUE;
     if (rows * cols > MAX_ARRAY_CELLS) return Err.NUM;
+    chargeWork(rows * cols);
     if (integer && (!Number.isInteger(min) || !Number.isInteger(max))) return Err.VALUE;
     const draw = integer ? () => min + Math.floor(Math.random() * (max - min + 1)) : () => min + Math.random() * (max - min);
     return Array.from({ length: rows }, () => Array.from({ length: cols }, draw));

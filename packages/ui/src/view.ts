@@ -6,7 +6,6 @@ import {
   clearRange,
   copyRange,
   ConditionalFormatEvaluator,
-  evaluate,
   toText,
   deleteCols,
   deleteRows,
@@ -1351,7 +1350,7 @@ export class SpreadsheetView {
       walk(parseFormula(formula), (n) => {
         if (target === null && n.type === 'func' && n.name === 'HYPERLINK' && n.args[0]) {
           const ctx = this.wb.calc.contextFor(this.sheet, row, col);
-          const v = evaluate(n.args[0], ctx);
+          const v = this.wb.calc.evaluateNode(n.args[0], this.sheet, row, col);
           const text = toText(Array.isArray(v) ? v[0]?.[0] ?? null : typeof v === 'object' && v && 'kind' in v ? ctx.getCell(v.sheet, v.range.start.row, v.range.start.col) : v);
           if (typeof text === 'string') target = text;
         }

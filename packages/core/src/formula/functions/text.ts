@@ -2,6 +2,7 @@ import { formatValue, parseNumber } from '../../numfmt.js';
 import { CellError, Err, isError, type Scalar } from '../../values.js';
 import { broadcast, deref, toMatrix, toNumber, toText, type EvalContext, type EvalValue, type Matrix } from '../evaluator.js';
 import type { EagerFunctionDef, FunctionDef } from '../registry.js';
+import { checkMatrixSize, checkTextLength } from '../limits.js';
 import { boolArg, def, numArg, scalarArg, scalarsOf, textArg, wildcardToRegExp } from './helpers.js';
 
 /** Text function of one argument, broadcast over arrays. */
@@ -19,6 +20,12 @@ function text1(name: string, description: string, f: (s: string) => string | num
 function formatFlag(v: EvalValue | undefined, ctx: EvalContext): boolean | CellError {
   const f = Math.trunc(numArg(v, ctx, 0));
   return f === 0 ? false : f === 1 ? true : Err.VALUE;
+}
+
+/** Joins texts after checking the length of the result. */
+function joinText(parts: string[], delimiter = ''): string {
+  checkTextLength(parts.reduce((n, s) => n + s.length, 0) + delimiter.length * Math.max(0, parts.length - 1));
+  return parts.join(delimiter);
 }
 
 function valueText(v: Scalar, strict: boolean): string {
@@ -50,6 +57,7 @@ function splitAll(text: string, delims: string[], ignoreCase: boolean): string[]
   for (let i = 0; i < text.length;) {
     const k = needles.findIndex((d) => hay.startsWith(d, i));
     if (k < 0) { i++; continue; }
+    checkMatrixSize(1, parts.length + 2);
     parts.push(text.slice(start, i));
     i += needles[k]!.length;
     start = i;
@@ -110,19 +118,28 @@ export const textFunctions: FunctionDef[] = [
     const ignoreCase = numArg(mode, ctx, 0) === 1;
     const padWith: Scalar = pad === undefined ? Err.NA : (deref(pad, ctx) as Scalar);
     const keep = (parts: string[]) => (ignoreEmpty ? parts.filter((p) => p !== '') : parts);
-    const rows = keep(splitAll(text, rowDelims, ignoreCase)).map((line) => keep(splitAll(line, colDelims, ignoreCase)));
-    const cols = Math.max(0, ...rows.map((r) => r.length));
+    const lines = keep(splitAll(text, rowDelims, ignoreCase));
+    checkMatrixSize(lines.length, 1);
+    const rows: string[][] = [];
+    let cols = 0;
+    for (const line of lines) {
+      const row = keep(splitAll(line, colDelims, ignoreCase));
+      cols = Math.max(cols, row.length);
+      checkMatrixSize(lines.length, cols);
+      rows.push(row);
+    }
     if (!rows.length || !cols) return new CellError('#CALC!', 'Empty array');
     return rows.map((r) => Array.from({ length: cols }, (_, c) => (c < r.length ? r[c]! : padWith))) as Matrix;
   }, { minArgs: 2, maxArgs: 6 }),
   def('TEXTBEFORE', 'text', 'TEXTBEFORE(text, delimiter, [instance_num], [match_mode], [match_end], [if_not_found])', 'Returns the text before a delimiter.', textAround(true), { minArgs: 2, maxArgs: 6 }),
   def('TEXTAFTER', 'text', 'TEXTAFTER(text, delimiter, [instance_num], [match_mode], [match_end], [if_not_found])', 'Returns the text after a delimiter.', textAround(false), { minArgs: 2, maxArgs: 6 }),
-  def('CONCATENATE', 'text', 'CONCATENATE(text1, [text2], ...)', 'Joins text values.', (args, ctx) => args.map((a) => textArg(a, ctx)).join(''), { minArgs: 1 }),
+  def('CONCATENATE', 'text', 'CONCATENATE(text1, [text2], ...)', 'Joins text values.', (args, ctx) => joinText(args.map((a) => textArg(a, ctx))), { minArgs: 1 }),
   def('CONCAT', 'text', 'CONCAT(text1, [text2], ...)', 'Joins text values and ranges.', (args, ctx) => {
     let out = '';
     for (const v of scalarsOf(args, ctx)) {
       const s = toText(v);
       if (isError(s)) return s;
+      checkTextLength(out.length + s.length);
       out += s;
     }
     return out;
@@ -137,7 +154,7 @@ export const textFunctions: FunctionDef[] = [
       if (skip && s === '') continue;
       parts.push(s);
     }
-    return parts.join(delim);
+    return joinText(parts, delim);
   }, { minArgs: 3 }),
   def('LEFT', 'text', 'LEFT(text, [num_chars])', 'Leftmost characters.', ([t, n], ctx) => {
     const k = numArg(n, ctx, 1);
@@ -166,7 +183,7 @@ export const textFunctions: FunctionDef[] = [
     const old = textArg(o, ctx);
     const rep = textArg(n, ctx);
     if (!old) return s;
-    if (inst === undefined) return s.split(old).join(rep);
+    if (inst === undefined) return joinText(s.split(old), rep);
     const k = numArg(inst, ctx);
     if (k < 1) return Err.VALUE;
     let idx = -1;
@@ -208,7 +225,10 @@ export const textFunctions: FunctionDef[] = [
   }, { minArgs: 1, maxArgs: 1 }),
   def('REPT', 'text', 'REPT(text, number_times)', 'Repeats text.', ([t, n], ctx) => {
     const k = numArg(n, ctx);
-    return k < 0 ? Err.VALUE : textArg(t, ctx).repeat(Math.trunc(k));
+    if (k < 0) return Err.VALUE;
+    const text = textArg(t, ctx);
+    checkTextLength(text.length * Math.trunc(k));
+    return text.repeat(Math.trunc(k));
   }, { minArgs: 2, maxArgs: 2 }),
   def('EXACT', 'text', 'EXACT(text1, text2)', 'Case-sensitive equality.', ([a, b], ctx) => textArg(a, ctx) === textArg(b, ctx), { minArgs: 2, maxArgs: 2 }),
   def('CHAR', 'text', 'CHAR(number)', 'Character for a code.', ([n], ctx) => String.fromCharCode(numArg(n, ctx)), { minArgs: 1, maxArgs: 1 }),
@@ -254,11 +274,12 @@ export const textFunctions: FunctionDef[] = [
     const strict = formatFlag(f, ctx);
     if (isError(strict)) return strict;
     const m = toMatrix(a!, ctx);
-    if (!strict) return m.flat().map((v) => valueText(v, false)).join(', ');
-    return `{${m.map((row) => row.map((v) => valueText(v, true)).join(',')).join(';')}}`;
+    if (!strict) return joinText(m.flat().map((v) => valueText(v, false)), ', ');
+    return `{${joinText(m.map((row) => joinText(row.map((v) => valueText(v, true)), ',')), ';')}}`;
   }, { minArgs: 1, maxArgs: 2 }),
   def('FIXED', 'text', 'FIXED(number, [decimals], [no_commas])', 'Formats a number with fixed decimals.', ([n, d, nc], ctx) => {
     const dec = Math.trunc(numArg(d, ctx, 2));
+    if (dec > 127) return Err.VALUE;
     const fmt = (boolArg(nc, ctx) ? '0' : '#,##0') + (dec > 0 ? '.' + '0'.repeat(dec) : '');
     return formatValue(numArg(n, ctx), fmt);
   }, { minArgs: 1, maxArgs: 3 }),

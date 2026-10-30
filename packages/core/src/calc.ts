@@ -4,6 +4,7 @@ import { deref, evaluate, evaluateCell, isRef, type EvalContext, type EvalValue,
 import { parseFormula, walk } from './formula/parser.js';
 import { getFunction } from './formula/registry.js';
 import { boundNames } from './formula/scope.js';
+import { CalcLimitError, checkMatrixSize, withCellBudget, withPassBudget } from './formula/limits.js';
 import type { Sheet } from './sheet.js';
 import { resolveStructuredRef, tableFilteredRows } from './table.js';
 import { CellError, Err, type Scalar } from './values.js';
@@ -19,6 +20,14 @@ export function gid(sheetId: number, row: number, col: number): number {
 function splitGid(g: number): { sheetId: number; row: number; col: number } {
   const sheetId = Math.floor(g / SHEET_FACTOR);
   return { sheetId, ...keyToAddress(g - sheetId * SHEET_FACTOR) };
+}
+
+/** Value of a formula whose evaluation threw, so that a pathological formula yields an error value. */
+function evaluationError(e: unknown): CellError {
+  if (e instanceof CellError) return e;
+  if (e instanceof CalcLimitError) return new CellError('#CALC!', e.message);
+  if (e instanceof RangeError) return new CellError('#CALC!', 'Recursion too deep');
+  return new CellError('#VALUE!', String(e));
 }
 
 interface FormulaInfo {
@@ -202,6 +211,10 @@ export class CalcEngine {
   }
 
   private evaluate(dirty: Set<number>): void {
+    withPassBudget(() => this.evaluatePasses(dirty));
+  }
+
+  private evaluatePasses(dirty: Set<number>): void {
     // Discover spill ownership before trusting dependencies on former blank cells.
     // Further passes are needed only when output rectangles change, not values.
     for (let pass = 0; pass < Math.min(this.formulas.size + 2, 100); pass++) {
@@ -314,7 +327,7 @@ export class CalcEngine {
     this.computing.add(id);
     try {
       const ctx = this.contextFor(sheet, info.row, info.col);
-      const result = evaluate(info.ast!, ctx);
+      const result = withCellBudget(() => evaluate(info.ast!, ctx));
       const output = isRef(result) ? deref(result, ctx) : result;
       if (Array.isArray(output)) {
         this.arrays.add(id);
@@ -324,7 +337,7 @@ export class CalcEngine {
         cell.value = output ?? 0;
       }
     } catch (e) {
-      cell.value = e instanceof RangeError ? new CellError('#CALC!', 'Recursion too deep') : new CellError('#VALUE!', String(e));
+      cell.value = evaluationError(e);
     } finally {
       this.computing.delete(id);
     }
@@ -396,12 +409,16 @@ export class CalcEngine {
   }
 
   private rangeValues(sheet: Sheet, range: RangeAddress): Matrix {
+    for (const point of [range.start, range.end]) {
+      if (!Number.isInteger(point.row) || !Number.isInteger(point.col) || point.row < 0 || point.row >= MAX_ROWS || point.col < 0 || point.col >= MAX_COLS) throw Err.REF;
+    }
     const used = sheet.usedRange();
     const { start } = range;
     // Whole-column/row references are clipped to the used area; only the far
     // edge is clipped so relative positions (INDEX/MATCH) stay correct.
     const endRow = range.end.row === MAX_ROWS - 1 ? Math.max(start.row, Math.min(range.end.row, used?.end.row ?? 0)) : range.end.row;
     const endCol = range.end.col === MAX_COLS - 1 ? Math.max(start.col, Math.min(range.end.col, used?.end.col ?? 0)) : range.end.col;
+    checkMatrixSize(endRow - start.row + 1, endCol - start.col + 1);
     const out: Matrix = [];
     for (let r = start.row; r <= endRow; r++) {
       const row: Scalar[] = [];
@@ -434,9 +451,18 @@ export class CalcEngine {
       };
     }
     try {
-      return evaluate(ast, ctx);
+      return withPassBudget(() => withCellBudget(() => evaluate(ast, ctx)));
     } catch (e) {
-      return e instanceof RangeError ? new CellError('#CALC!', 'Recursion too deep') : new CellError('#VALUE!', String(e));
+      return evaluationError(e);
+    }
+  }
+
+  /** Evaluates part of a parsed formula in the context of a cell (ranges stay references). */
+  evaluateNode(node: Node, sheet: Sheet, row: number, col: number): EvalValue {
+    try {
+      return withPassBudget(() => withCellBudget(() => evaluate(node, this.contextFor(sheet, row, col))));
+    } catch (e) {
+      return evaluationError(e);
     }
   }
 
@@ -445,10 +471,9 @@ export class CalcEngine {
     const ast = this.parse(formula.startsWith('=') ? formula.slice(1) : formula);
     if (ast instanceof CellError) return ast;
     try {
-      return evaluateCell(ast, this.contextFor(sheet, row, col));
+      return withPassBudget(() => withCellBudget(() => evaluateCell(ast, this.contextFor(sheet, row, col))));
     } catch (e) {
-      // Same mapping as for stored cells, so a pathological formula yields an error value instead of throwing.
-      return e instanceof RangeError ? new CellError('#CALC!', 'Recursion too deep') : new CellError('#VALUE!', String(e));
+      return evaluationError(e);
     }
   }
 

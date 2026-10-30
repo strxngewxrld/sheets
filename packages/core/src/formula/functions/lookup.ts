@@ -2,6 +2,7 @@ import { colToName, formatAddress, MAX_COLS, MAX_ROWS, normalizeRange, quoteShee
 import { Err, isError, type Scalar } from '../../values.js';
 import { compareScalars, isRef, toMatrix, toScalar, type EvalValue, type FunctionContext, type Matrix } from '../evaluator.js';
 import type { FunctionDef } from '../registry.js';
+import { checkMatrixSize } from '../limits.js';
 import { bail, boolArg, def, numArg, rangeCols, rangeRows, scalarArg, textArg, wildcardToRegExp } from './helpers.js';
 
 function cellAt(m: Matrix, r: number, c: number): Scalar {
@@ -12,6 +13,7 @@ function vector(arg: EvalValue, ctx: FunctionContext): Scalar[] {
   const m = toMatrix(arg, ctx);
   const rows = rangeRows(arg, m);
   const cols = rangeCols(arg, m);
+  checkMatrixSize(rows, cols);
   const out: Scalar[] = [];
   if (rows === 1) for (let c = 0; c < cols; c++) out.push(cellAt(m, 0, c));
   else if (cols === 1) for (let r = 0; r < rows; r++) out.push(cellAt(m, r, 0));
@@ -109,15 +111,18 @@ export const lookupFunctions: FunctionDef[] = [
     if (vertical) {
       const row = rm[idx] ?? [];
       const width = rangeCols(ret!, rm);
+      checkMatrixSize(1, width);
       if (width === 1) return row[0] ?? null;
       return [Array.from({ length: width }, (_, c) => row[c] ?? null)];
     }
     const height = rangeRows(ret!, rm);
+    checkMatrixSize(height, 1);
     if (height === 1) return cellAt(rm, 0, idx);
     return Array.from({ length: height }, (_, r) => [cellAt(rm, r, idx)]);
   }, { minArgs: 3, maxArgs: 6 }),
   def('INDEX', 'lookup', 'INDEX(array, row_num, [column_num])', 'Value at a given position of a range.', ([arr, r, c], ctx) => {
-    const m = toMatrix(arr!, ctx);
+    // Reference indexing needs only bounds; do not materialize an entire sheet.
+    const m = isRef(arr!) ? [] : toMatrix(arr!, ctx);
     const rows = rangeRows(arr!, m);
     const cols = rangeCols(arr!, m);
     let row = Math.trunc(numArg(r, ctx, 0));
@@ -140,15 +145,15 @@ export const lookupFunctions: FunctionDef[] = [
   }, { minArgs: 2, maxArgs: 3 }),
   def('ROW', 'lookup', 'ROW([reference])', 'Row number of a reference.', ([ref], ctx) => (ref === undefined ? ctx.row + 1 : isRef(ref) ? ref.range.start.row + 1 : Err.VALUE), { maxArgs: 1 }),
   def('COLUMN', 'lookup', 'COLUMN([reference])', 'Column number of a reference.', ([ref], ctx) => (ref === undefined ? ctx.col + 1 : isRef(ref) ? ref.range.start.col + 1 : Err.VALUE), { maxArgs: 1 }),
-  def('ROWS', 'lookup', 'ROWS(array)', 'Number of rows in a range.', ([a], ctx) => rangeRows(a!, toMatrix(a!, ctx)), { minArgs: 1, maxArgs: 1 }),
-  def('COLUMNS', 'lookup', 'COLUMNS(array)', 'Number of columns in a range.', ([a], ctx) => rangeCols(a!, toMatrix(a!, ctx)), { minArgs: 1, maxArgs: 1 }),
+  def('ROWS', 'lookup', 'ROWS(array)', 'Number of rows in a range.', ([a], ctx) => rangeRows(a!, isRef(a!) ? [] : toMatrix(a!, ctx)), { minArgs: 1, maxArgs: 1 }),
+  def('COLUMNS', 'lookup', 'COLUMNS(array)', 'Number of columns in a range.', ([a], ctx) => rangeCols(a!, isRef(a!) ? [] : toMatrix(a!, ctx)), { minArgs: 1, maxArgs: 1 }),
   def('OFFSET', 'lookup', 'OFFSET(reference, rows, cols, [height], [width])', 'Reference shifted by rows/cols.', ([ref, r, c, h, w], ctx) => {
     if (!isRef(ref!)) return Err.VALUE;
     const height = numArg(h, ctx, ref.range.end.row - ref.range.start.row + 1);
     const width = numArg(w, ctx, ref.range.end.col - ref.range.start.col + 1);
     const sr = ref.range.start.row + Math.trunc(numArg(r, ctx));
     const sc = ref.range.start.col + Math.trunc(numArg(c, ctx));
-    if (sr < 0 || sc < 0 || height < 1 || width < 1) return Err.REF;
+    if (![sr, sc, height, width].every(Number.isSafeInteger) || sr < 0 || sc < 0 || height < 1 || width < 1 || sr + height > MAX_ROWS || sc + width > MAX_COLS) return Err.REF;
     return { kind: 'ref', sheet: ref.sheet, range: { start: { row: sr, col: sc }, end: { row: sr + height - 1, col: sc + width - 1 } } };
   }, { minArgs: 3, maxArgs: 5, volatile: true }),
   def('INDIRECT', 'lookup', 'INDIRECT(ref_text, [a1])', 'Reference from a text string (A1 or, with a1 = FALSE, R1C1 style).', ([t, a1], ctx) => {

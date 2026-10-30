@@ -1,5 +1,6 @@
 import { Err, isError, type CellError, type Scalar } from '../../values.js';
 import { compileSafeRegex, RE2JS } from '../../regex.js';
+import { checkMatrixSize } from '../limits.js';
 import {
   broadcast,
   checkNumber,
@@ -178,6 +179,7 @@ export function criteriaMask(pairs: [EvalValue, EvalValue][], ctx: EvalContext):
     if (rows < 0) {
       rows = r;
       cols = c;
+      checkMatrixSize(rows, cols);
       mask = new Array(rows * cols).fill(true);
     } else if (r !== rows || c !== cols) bail(Err.VALUE);
     const pred = makeCriteria(scalarArg(critArg, ctx));

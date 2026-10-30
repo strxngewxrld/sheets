@@ -15,7 +15,7 @@ import {
   type Matrix,
 } from '../evaluator.js';
 import type { FunctionDef, LazyFunctionDef } from '../registry.js';
-import { MAX_ARRAY_CELLS } from './array.js';
+import { checkMatrixSize } from '../limits.js';
 import { bail, def, numArg } from './helpers.js';
 
 const NAME_RE = /^(?:_xlpm\.)?[A-Za-z_\\À-￿][\w.À-￿]*$/u;
@@ -40,7 +40,7 @@ function callScalar(fn: LambdaValue, args: EvalValue[], ctx: EvalContext): Scala
 
 function checkSize(rows: number, cols: number): void {
   if (rows < 1 || cols < 1) bail(Err.VALUE);
-  if (rows * cols > MAX_ARRAY_CELLS) bail(new CellError('#CALC!', 'Array exceeds the cell limit'));
+  checkMatrixSize(rows, cols);
 }
 
 function lazy(name: string, syntax: string, description: string, impl: LazyFunctionDef['impl'], extra: Partial<LazyFunctionDef> = {}): LazyFunctionDef {

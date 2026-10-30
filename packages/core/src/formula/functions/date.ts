@@ -25,9 +25,10 @@ function addMonths(serial: number, months: number): { y: number; m: number; d: n
 
 // Weekend days indexed by weekday (0 = Sunday).
 const SAT_SUN = [true, false, false, false, false, false, true];
+const MAX_DATE_SERIAL = 2_958_465; // 9999-12-31, Excel's last supported date.
 
-function isWorkday(serial: number, holidays: Set<number>, weekend: boolean[] = SAT_SUN): boolean {
-  return !weekend[serialToParts(serial).weekday] && !holidays.has(serial);
+function checkDate(serial: number): void {
+  if (!Number.isSafeInteger(serial) || serial < 0 || serial > MAX_DATE_SERIAL) bail(Err.NUM);
 }
 
 function holidaySet(arg: EvalValue | undefined, ctx: FunctionContext): Set<number> {
@@ -37,7 +38,10 @@ function holidaySet(arg: EvalValue | undefined, ctx: FunctionContext): Set<numbe
     // Dates given as text, e.g. {"2006/1/2"}, count like in Excel.
     const serial = typeof v === 'string' ? parseInput(v).value : v;
     if (typeof v === 'string' && typeof serial !== 'number') bail(Err.VALUE);
-    if (typeof serial === 'number') holidays.add(Math.trunc(serial));
+    if (typeof serial === 'number') {
+      checkDate(Math.trunc(serial));
+      holidays.add(Math.trunc(serial));
+    }
   }
   return holidays;
 }
@@ -65,22 +69,63 @@ function weekendArg(arg: EvalValue | undefined, ctx: FunctionContext): boolean[]
   return days;
 }
 
-function networkDays(start: number, end: number, holidays: Set<number>, weekend?: boolean[]): number {
-  const sign = start <= end ? 1 : -1;
-  if (sign < 0) [start, end] = [end, start];
-  let n = 0;
-  for (let d = start; d <= end; d++) if (isWorkday(d, holidays, weekend)) n++;
-  return n * sign;
+/** At most six remainder days; split at Excel's fictitious leap day. */
+function weekdays(start: number, end: number, weekend: boolean[]): number {
+  if (start > end) return 0;
+  if (start <= 60 && end > 60) return weekdays(start, 60, weekend) + weekdays(61, end, weekend);
+  const length = end - start + 1;
+  let n = Math.floor(length / 7) * weekend.filter((day) => !day).length;
+  const first = serialToParts(start).weekday;
+  for (let i = 0; i < length % 7; i++) if (!weekend[(first + i) % 7]) n++;
+  return n;
 }
 
-function workday(start: number, days: number, holidays: Set<number>, weekend?: boolean[]): number {
-  let d = start;
-  const step = days >= 0 ? 1 : -1;
-  while (days !== 0) {
-    d += step;
-    if (isWorkday(d, holidays, weekend)) days -= step;
+function holidayIndex(holidays: Set<number>, weekend: boolean[]): number[] {
+  return [...holidays].filter((day) => !weekend[serialToParts(day).weekday]).sort((a, b) => a - b);
+}
+
+/** Index of the first holiday on or after day. */
+function lowerBound(holidays: number[], day: number): number {
+  let lo = 0, hi = holidays.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (holidays[mid]! < day) lo = mid + 1;
+    else hi = mid;
   }
-  return d;
+  return lo;
+}
+
+function countWorkdays(start: number, end: number, holidays: number[], weekend: boolean[]): number {
+  return weekdays(start, end, weekend) - (lowerBound(holidays, end + 1) - lowerBound(holidays, start));
+}
+
+function networkDays(start: number, end: number, holidays: Set<number>, weekend = SAT_SUN): number {
+  checkDate(start);
+  checkDate(end);
+  const sign = start <= end ? 1 : -1;
+  if (sign < 0) [start, end] = [end, start];
+  return countWorkdays(start, end, holidayIndex(holidays, weekend), weekend) * sign;
+}
+
+function workday(start: number, days: number, holidays: Set<number>, weekend = SAT_SUN): number {
+  checkDate(start);
+  if (!Number.isSafeInteger(days) || Math.abs(days) > MAX_DATE_SERIAL) bail(Err.NUM);
+  if (days === 0) return start;
+  const step = days >= 0 ? 1 : -1;
+  const sorted = holidayIndex(holidays, weekend);
+  const count = (distance: number) => step > 0
+    ? countWorkdays(start + 1, start + distance, sorted, weekend)
+    : countWorkdays(start - distance, start - 1, sorted, weekend);
+  let lo = 1, hi = step > 0 ? MAX_DATE_SERIAL - start : start;
+  const target = Math.abs(days);
+  if (hi < 1 || count(hi) < target) bail(Err.NUM);
+  // Find the first distance containing the requested number of workdays.
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (count(mid) < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return start + step * lo;
 }
 
 const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;

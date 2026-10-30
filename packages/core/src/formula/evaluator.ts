@@ -3,6 +3,7 @@ import { formatGeneral } from '../numfmt.js';
 import { CellError, Err, isError, type Scalar } from '../values.js';
 import { INVOKE, type Node, type StructuredRef } from './ast.js';
 import { getFunction } from './registry.js';
+import { chargeWork, checkMatrixSize, MAX_TEXT_LENGTH } from './limits.js';
 
 export type Matrix = Scalar[][];
 
@@ -101,6 +102,7 @@ export function callLambda(fn: LambdaValue, args: EvalValue[], ctx: EvalContext)
       if (call.args.length > call.fn.params.length) return Err.VALUE;
       // Count logical calls even when tail calls use no additional JS stack.
       if (lambdaDepth >= MAX_LAMBDA_DEPTH) throw new RangeError('LAMBDA recursion too deep');
+      chargeWork(call.fn.params.length + 1);
       lambdaDepth++;
       const caller = Object.assign(Object.create(call.fn.scope) as EvalContext, { row: call.ctx.row, col: call.ctx.col });
       const scope = withLocals(caller, call.fn.params.map((p, i) => [p, call.args[i] ?? null]));
@@ -217,6 +219,7 @@ export function broadcast(values: (Scalar | Matrix)[], fn: (...s: Scalar[]) => S
   if (matrices.length === 0) return fn(...(values as Scalar[]));
   const rows = Math.max(...matrices.map((m) => m.length));
   const cols = Math.max(...matrices.map((m) => m[0]?.length ?? 0));
+  checkMatrixSize(rows, cols);
   const out: Matrix = [];
   for (let r = 0; r < rows; r++) {
     const row: Scalar[] = [];
@@ -264,6 +267,8 @@ function binaryScalar(op: string, a: Scalar, b: Scalar): Scalar {
       if (isError(x)) return x;
       const y = toText(b);
       if (isError(y)) return y;
+      if (x.length + y.length > MAX_TEXT_LENGTH) return Err.VALUE;
+      chargeWork(x.length + y.length);
       return x + y;
     }
     case '=': case '<>': case '<': case '>': case '<=': case '>=': {
@@ -285,6 +290,7 @@ function binaryScalar(op: string, a: Scalar, b: Scalar): Scalar {
 }
 
 export function evaluate(node: Node, ctx: EvalContext, tailCall?: TailCall): EvalValue {
+  chargeWork(1);
   switch (node.type) {
     case 'number':
       return node.value;
@@ -383,8 +389,8 @@ export function evaluate(node: Node, ctx: EvalContext, tailCall?: TailCall): Eva
         evaluateTail: (n: Node, scope = ctx) => evaluate(n, scope, tailCall),
       }) as FunctionContext;
       try {
-        if (def.lazy) return def.impl(node.args, fctx);
-        return def.impl(node.args.map((a) => evaluate(a, ctx)), fctx);
+        const result = def.lazy ? def.impl(node.args, fctx) : def.impl(node.args.map((a) => evaluate(a, ctx)), fctx);
+        return typeof result === 'string' && result.length > MAX_TEXT_LENGTH ? Err.VALUE : result;
       } catch (e) {
         if (e instanceof CellError) return e;
         throw e;

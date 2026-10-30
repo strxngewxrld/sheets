@@ -1,5 +1,6 @@
 import { formatRange, parseRange, type CellAddress, type RangeAddress } from './address.js';
 import { formatValue } from './numfmt.js';
+import type { Sheet } from './sheet.js';
 import { isError, type Scalar } from './values.js';
 import type { Workbook } from './workbook.js';
 
@@ -58,34 +59,40 @@ export function newChartId(): string {
   return `chart-${Date.now().toString(36)}-${chartCounter}`;
 }
 
-function refValues(wb: Workbook, ref: string | undefined): Scalar[] {
-  if (!ref) return [];
+/** Points per reference a chart shows, like Excel's limit for 2-D charts; files may reference whole sheets. */
+export const MAX_CHART_POINTS = 32_000;
+
+/** Visits the cells of a reference within the sheet's used area, at most MAX_CHART_POINTS. */
+function eachRefCell(wb: Workbook, ref: string | undefined, visit: (sheet: Sheet, row: number, col: number) => void): void {
+  if (!ref) return;
   const parsed = parseRange(ref);
-  if (!parsed) return [];
-  const sheet = wb.getSheet(parsed.sheet ?? wb.sheets[0]!.name);
-  if (!sheet) return [];
-  const out: Scalar[] = [];
+  const sheet = parsed && wb.getSheet(parsed.sheet ?? wb.sheets[0]!.name);
+  if (!parsed || !sheet) return;
   const { start, end } = parsed.range;
   const used = sheet.usedRange();
   const lastRow = Math.min(end.row, used?.end.row ?? start.row);
   const lastCol = Math.min(end.col, used?.end.col ?? start.col);
-  for (let r = start.row; r <= lastRow; r++) for (let c = start.col; c <= lastCol; c++) out.push(sheet.getValue(r, c));
+  let points = 0;
+  for (let r = start.row; r <= lastRow; r++) {
+    for (let c = start.col; c <= lastCol; c++) {
+      if (points++ >= MAX_CHART_POINTS) return;
+      visit(sheet, r, c);
+    }
+  }
+}
+
+function refValues(wb: Workbook, ref: string | undefined): Scalar[] {
+  const out: Scalar[] = [];
+  eachRefCell(wb, ref, (sheet, r, c) => out.push(sheet.getValue(r, c)));
   return out;
 }
 
 function refDisplay(wb: Workbook, ref: string | undefined): string[] {
-  if (!ref) return [];
-  const parsed = parseRange(ref);
-  const sheet = parsed && wb.getSheet(parsed.sheet ?? wb.sheets[0]!.name);
-  if (!parsed || !sheet) return [];
   const out: string[] = [];
-  const { start, end } = parsed.range;
-  for (let r = start.row; r <= end.row; r++) {
-    for (let c = start.col; c <= end.col; c++) {
-      const cell = sheet.getCell(r, c);
-      out.push(cell ? formatValue(cell.value, cell.style?.numFmt) : '');
-    }
-  }
+  eachRefCell(wb, ref, (sheet, r, c) => {
+    const cell = sheet.getCell(r, c);
+    out.push(cell ? formatValue(cell.value, cell.style?.numFmt) : '');
+  });
   return out;
 }
 
